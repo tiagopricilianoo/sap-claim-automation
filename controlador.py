@@ -77,6 +77,7 @@ def montar_request(campos: dict[str, object]) -> ClaimRequest:
         ordem=campos.get("ordem", ""),
         item=campos.get("item", ""),
         arquivo=campos.get("arquivo", ""),
+        sem_anexo=bool(campos.get("sem_anexo", False)),
     )
 
 

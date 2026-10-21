@@ -6,6 +6,12 @@ Uso:
     python publicar.py "\\\\servidor\\pasta\\AutomacaoClaims"
     python publicar.py "\\\\servidor\\pasta\\AutomacaoClaims" --nota "nova rota X"
     python publicar.py "\\\\servidor\\pasta\\AutomacaoClaims" --versao 2.0.0
+    python publicar.py "\\\\servidor\\pasta\\AutomacaoClaims" --com-python
+
+--com-python copia também o Python em uso (com tkinter, pywin32 e customtkinter)
+para <servidor>\\python. Assim, o instalador funciona em máquinas sem Python,
+sem internet e sem permissão de administrador. Só é preciso repetir quando
+quiser trocar a versão do Python ou das bibliotecas.
 
 O que faz:
 1. Roda todos os testes. Se algum falhar, NADA é publicado.
@@ -113,11 +119,61 @@ def publicar(servidor: Path, versao: str | None = None, nota: str = "", origem: 
     return nova
 
 
+# Bibliotecas que o runtime embutido precisa ter (pasta dentro de Lib/site-packages).
+BIBLIOTECAS_DO_RUNTIME = ("customtkinter", "win32com", "win32")
+
+
+def runtime_atual() -> Path:
+    """Pasta do Python em uso (a base, mesmo se estiver num ambiente virtual)."""
+    return Path(sys.base_prefix)
+
+
+def verificar_runtime(runtime: Path) -> list[str]:
+    """Problemas que impedem usar a pasta como Python embutido."""
+    problemas = []
+    for exe in ("python.exe", "pythonw.exe"):
+        if not (runtime / exe).exists():
+            problemas.append(f"{exe} não encontrado em {runtime}")
+    if not (runtime / "Lib" / "tkinter").exists() and not (runtime / "tcl").exists():
+        problemas.append("tkinter ausente (a versão 'embeddable' do Python não serve)")
+    for biblioteca in BIBLIOTECAS_DO_RUNTIME:
+        if not (runtime / "Lib" / "site-packages" / biblioteca).exists():
+            problemas.append(f"biblioteca {biblioteca} não instalada neste Python")
+    return problemas
+
+
+def publicar_runtime(servidor: Path, runtime: Path | None = None) -> str:
+    """Copia o Python (com as bibliotecas) para <servidor>/python, trocando de uma vez."""
+    runtime = runtime or runtime_atual()
+    problemas = verificar_runtime(runtime)
+    if problemas:
+        raise ValueError("Python não pode ser embutido: " + "; ".join(problemas))
+    destino, temporaria, anterior = servidor / "python", servidor / "python_publicando", servidor / "python_anterior"
+    if temporaria.exists():
+        shutil.rmtree(temporaria)
+    shutil.copytree(runtime, temporaria, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "pytest*", "_pytest"))
+    descricao = f"{sys.version.split()[0]} | {runtime}"
+    (temporaria / "runtime.txt").write_text(descricao + "\n", encoding="utf-8")
+    if anterior.exists():
+        shutil.rmtree(anterior)
+    if destino.exists():
+        destino.rename(anterior)
+    try:
+        temporaria.rename(destino)
+    except OSError:
+        if anterior.exists() and not destino.exists():
+            anterior.rename(destino)
+        raise
+    return descricao
+
+
 def main() -> int:
     argumentos = argparse.ArgumentParser(description="Publica a Automação de Claims no servidor.")
     argumentos.add_argument("servidor", help="Pasta do servidor (a que contém instalar.bat)")
     argumentos.add_argument("--versao", help="Número da versão (padrão: aumenta o último número)")
     argumentos.add_argument("--nota", default="", help="O que mudou (vai para historico_versoes.txt)")
+    argumentos.add_argument("--com-python", action="store_true",
+                            help="Copia também o Python (com as bibliotecas) para o servidor")
     args = argumentos.parse_args()
 
     servidor = Path(args.servidor)
@@ -128,6 +184,9 @@ def main() -> int:
         print("\n  [BLOQUEADO] Há testes falhando. Nada foi publicado.")
         return 1
     try:
+        if args.com_python:
+            print("\n  Copiando o Python para o servidor (pode levar alguns minutos)...")
+            print(f"  Python publicado: {publicar_runtime(servidor)}")
         nova = publicar(servidor, args.versao, args.nota)
     except (OSError, ValueError) as erro:
         print(f"\n  [ERRO] Publicação não concluída: {erro}")

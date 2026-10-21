@@ -123,8 +123,55 @@ def test_falha_no_pip_mantem_a_versao_anterior(servidor, pc):
     def pip_quebrado(_):
         raise RuntimeError("sem internet")
     with pytest.raises(RuntimeError):
-        iniciar.atualizar(servidor / "app", pc, instalar_libs=pip_quebrado)
+        iniciar.atualizar(servidor / "app", pc, instalar_libs=pip_quebrado, libs_presentes=lambda: False)
     assert iniciar.ler_versao(pc / "app") == "1.0.0"       # continua funcionando
+    assert not (pc / "app_novo").exists()
+
+
+def test_pip_sem_internet_com_python_embutido_segue(servidor, pc):
+    publicar.publicar(servidor)
+
+    def pip_sem_internet(_):
+        raise RuntimeError("sem conexão")
+    resultado = iniciar.atualizar(servidor / "app", pc, instalar_libs=pip_sem_internet, libs_presentes=lambda: True)
+    assert "atualizado" in resultado and iniciar.ler_versao(pc / "app") == "1.0.0"
+
+
+# ------------------------------------------------------------------ Python embutido
+
+def _runtime_falso(pasta, com=("customtkinter", "win32com", "win32"), tkinter=True):
+    pasta.mkdir()
+    for exe in ("python.exe", "pythonw.exe"):
+        (pasta / exe).write_bytes(b"MZ")
+    if tkinter:
+        (pasta / "Lib" / "tkinter").mkdir(parents=True)
+    for nome in com:
+        (pasta / "Lib" / "site-packages" / nome).mkdir(parents=True, exist_ok=True)
+    (pasta / "Lib" / "site-packages" / "pytest").mkdir(parents=True, exist_ok=True)
+    return pasta
+
+
+def test_publica_o_python_embutido(servidor, tmp_path):
+    runtime = _runtime_falso(tmp_path / "python315")
+    publicar.publicar_runtime(servidor, runtime)
+    assert (servidor / "python" / "pythonw.exe").exists()
+    assert (servidor / "python" / "Lib" / "site-packages" / "customtkinter").exists()
+    assert not (servidor / "python" / "Lib" / "site-packages" / "pytest").exists()   # só o necessário
+    assert (servidor / "python" / "runtime.txt").exists()
+    publicar.publicar_runtime(servidor, runtime)                                      # republicar troca
+    assert (servidor / "python_anterior").exists() and not (servidor / "python_publicando").exists()
+
+
+@pytest.mark.parametrize("problema,kwargs", [
+    ("tkinter", {"tkinter": False}),
+    ("customtkinter", {"com": ("win32com", "win32")}),
+    ("win32com", {"com": ("customtkinter", "win32")}),
+])
+def test_recusa_python_incompleto(servidor, tmp_path, problema, kwargs):
+    runtime = _runtime_falso(tmp_path / "python", **kwargs)
+    with pytest.raises(ValueError, match=problema):
+        publicar.publicar_runtime(servidor, runtime)
+    assert not (servidor / "python").exists()
 
 
 def test_requirements_igual_nao_roda_pip(servidor, pc):

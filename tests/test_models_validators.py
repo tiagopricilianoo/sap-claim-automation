@@ -101,3 +101,22 @@ def test_aceita_qualquer_extensao(request_valido, settings, tmp_path):
 def _form(req):
     return dict(tipo=req.tipo, descricao=req.descricao, texto_livre=req.texto_livre,
                 ordem=req.ordem, item=req.item, arquivo=str(req.arquivo))
+
+
+# ------------------------------------------------------------ claim sem anexo
+
+def test_sem_anexo_explicito_e_valido(request_valido, settings):
+    req = ClaimRequest.from_form(**{**_form(request_valido), "arquivo": ""}, sem_anexo=True)
+    assert req.sem_anexo and req.arquivo is None
+    assert validate(req, settings) == []
+
+
+def test_sem_arquivo_e_sem_marcar_continua_obrigatorio(request_valido, settings):
+    req = ClaimRequest.from_form(**{**_form(request_valido), "arquivo": ""})
+    problemas = validate(req, settings)
+    assert campos(problemas) == {"arquivo"} and "não tem anexo" in problemas[0].mensagem
+
+
+def test_arquivo_e_sem_anexo_ao_mesmo_tempo_e_contraditorio(request_valido, settings):
+    req = ClaimRequest.from_form(**_form(request_valido), sem_anexo=True)
+    assert campos(validate(req, settings)) == {"arquivo"}

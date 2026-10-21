@@ -126,6 +126,7 @@ class ClaimService:
         if modo in MODOS_QUE_GRAVAM and not self._cfg.automatico_habilitado:
             raise ValueError(f"Modo {modo} grava no SAP: habilite em [execucao] automatico_habilitado = sim")
         com_documento, grava = MODOS[modo]
+        com_documento = com_documento and not req.sem_anexo
         self._atual = ""
 
         eid = self._db.criar_execucao(req, modo)
@@ -188,7 +189,11 @@ class ClaimService:
             self._ok("avisos", f"{len(avisos)} aviso(s) aceito(s)" if avisos else "nenhum aviso")
 
             # E - Fase 2: documento ZDC (primeira gravação no SAP)
-            if com_documento:
+            if req.sem_anexo and MODOS[modo][0]:
+                self._inicio("documento")
+                self._db.registrar_evento(eid, "SEM_ANEXO", "claim sem anexo: documento não criado")
+                self._ok("documento", "sem anexo · etapa pulada")
+            elif com_documento:
                 self._inicio("documento")
                 self._db.registrar_evento(eid, "DOCUMENTO_ENVIADO", req.nome_arquivo)
                 documento = self._sap.criar_documento(
@@ -230,12 +235,11 @@ class ClaimService:
                              **extras)
 
         if not grava:   # ASSISTIDO
-            self._db.transitar(eid, E.REVISAO_NECESSARIA,
-                               f"assistido: documento {documento} gravado; claim aguardando gravação manual")
+            doc = f"documento {self._cfg.doc_tipo} {documento} gravado" if documento else "sem anexo"
+            self._db.transitar(eid, E.REVISAO_NECESSARIA, f"assistido: {doc}; claim aguardando gravação manual")
             return Resultado(
                 eid, E.REVISAO_NECESSARIA,
-                f"Tudo preenchido e documento {self._cfg.doc_tipo} {documento} gravado. "
-                "Confira a janela do SAP e grave o claim manualmente (Ctrl+S).",
+                f"Tudo preenchido ({doc}). Confira a janela do SAP e grave o claim manualmente (Ctrl+S).",
                 **extras,
             )
 

@@ -66,6 +66,14 @@ def _python_console() -> str:
     return str(candidato if candidato.exists() else exe)
 
 
+BIBLIOTECAS_ESSENCIAIS = ("customtkinter", "win32com")
+
+
+def bibliotecas_presentes() -> bool:
+    import importlib.util
+    return all(importlib.util.find_spec(nome) is not None for nome in BIBLIOTECAS_ESSENCIAIS)
+
+
 def instalar_dependencias(requirements: Path) -> None:
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     resultado = subprocess.run(
@@ -79,7 +87,8 @@ def instalar_dependencias(requirements: Path) -> None:
 
 # ----------------------------------------------------------------------- atualização
 
-def atualizar(origem: Path | None, local: Path = LOCAL, instalar_libs=instalar_dependencias) -> str:
+def atualizar(origem: Path | None, local: Path = LOCAL, instalar_libs=instalar_dependencias,
+              libs_presentes=bibliotecas_presentes) -> str:
     """Atualiza local/app a partir de origem. Retorna o que aconteceu (para o log).
 
     Nunca deixa o computador sem uma versão funcional: a cópia vai para app_novo
@@ -108,7 +117,14 @@ def atualizar(origem: Path | None, local: Path = LOCAL, instalar_libs=instalar_d
 
     req_novo, req_atual = novo / "requirements.txt", app / "requirements.txt"
     if req_novo.exists() and (not req_atual.exists() or not filecmp.cmp(req_novo, req_atual, shallow=False)):
-        instalar_libs(req_novo)
+        try:
+            instalar_libs(req_novo)
+        except Exception:  # noqa: BLE001
+            # Python embutido já traz as bibliotecas: sem internet, o pip falha mas não faz falta.
+            if not libs_presentes():
+                _remover(novo)
+                raise
+            log.warning("pip falhou, mas as bibliotecas essenciais já estão presentes; seguindo")
 
     _remover(anterior)
     if app.exists():

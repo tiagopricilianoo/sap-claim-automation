@@ -11,4 +11,6 @@ ORÇAMENTISTAS - instalação (uma vez por computador)
 RESPONSÁVEL PELA FERRAMENTA - publicar uma atualização
   Na cópia de desenvolvimento:  python publicar.py "<esta pasta>"
   Os testes rodam antes; se algum falhar, nada é publicado.
+  Primeira vez (ou para trocar o Python): acrescente --com-python.
+  Com o Python no servidor, o instalador funciona em máquinas sem Python.
   NÃO edite os arquivos de app\ direto: use sempre o publicar.py.

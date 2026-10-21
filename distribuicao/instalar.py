@@ -46,11 +46,14 @@ def main() -> int:
         print(f"\n  [ERRO] Programa não encontrado em {ORIGEM}")
         return 1
 
-    passo("1/4  Instalando bibliotecas...")
-    if subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(ORIGEM / "requirements.txt"),
-                       "--disable-pip-version-check"]).returncode != 0:
-        print("\n  [ERRO] Não foi possível instalar as bibliotecas. Verifique a internet/proxy.")
-        return 1
+    if "--python-embutido" in sys.argv:
+        passo("1/4  Python do programa copiado (bibliotecas já incluídas).")
+    else:
+        passo("1/4  Instalando bibliotecas...")
+        if subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(ORIGEM / "requirements.txt"),
+                           "--disable-pip-version-check"]).returncode != 0:
+            print("\n  [ERRO] Não foi possível instalar as bibliotecas. Verifique a internet/proxy.")
+            return 1
 
     passo("2/4  Preparando a pasta local...")
     LOCAL.mkdir(parents=True, exist_ok=True)

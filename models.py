@@ -30,6 +30,7 @@ class ClaimRequest:
     ordem: str
     item: str
     arquivo: Path | None
+    sem_anexo: bool = False   # escolha explícita: claim sem anexo (pula o documento)
 
     @classmethod
     def from_form(
@@ -41,6 +42,7 @@ class ClaimRequest:
         ordem: object,
         item: object,
         arquivo: object,
+        sem_anexo: object = False,
     ) -> "ClaimRequest":
         caminho = _limpar_pontas(arquivo).strip('"')
         return cls(
@@ -50,6 +52,7 @@ class ClaimRequest:
             ordem=_limpar_pontas(ordem),
             item=_limpar_pontas(item),
             arquivo=Path(caminho) if caminho else None,
+            sem_anexo=bool(sem_anexo),
         )
 
     @property

@@ -208,3 +208,9 @@ def test_nao_resolve_execucao_finalizada(tmp_path, request_valido):
     with pytest.raises(ValueError, match="não está pendente"):
         resolver_pendencia(db, eid, criado=False)
     db.close()
+
+
+def test_formulario_sem_anexo(settings, arquivo_pdf):
+    campos = {**_campos(arquivo_pdf), "arquivo": "", "sem_anexo": True}
+    assert montar_request(campos).sem_anexo is True
+    assert validar_formulario(campos, settings) == {}

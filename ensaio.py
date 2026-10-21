@@ -61,7 +61,8 @@ def main() -> int:
         texto_livre=_perguntar_texto_livre(),
         ordem=input("Ordem do cliente: "),
         item=input("Item da ordem: "),
-        arquivo=input("Arquivo anexo (caminho completo): "),
+        arquivo=(arquivo := input("Arquivo anexo (caminho completo; vazio = sem anexo): ")),
+        sem_anexo=not arquivo.strip() and input("Confirma claim SEM anexo? (s/n): ").strip().lower() == "s",
     )
 
     if simular:

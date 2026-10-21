@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.13%20%7C%203.15-3776AB?logo=python&logoColor=white)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-0078D6?logo=windows&logoColor=white)
 ![SAP GUI Scripting](https://img.shields.io/badge/SAP%20GUI-Scripting-0FAAFF)
-![Testes](https://img.shields.io/badge/testes-155%20passando-2EA44F)
+![Testes](https://img.shields.io/badge/testes-168%20passando-2EA44F)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-todos%20os%20direitos%20reservados-lightgrey)
 
 </div>
@@ -57,6 +57,8 @@ Esta aplicação desktop recebe os dados num formulário, **valida tudo antes de
 | Máquina de estados | Depois de enviar a gravação, nenhum caminho volta a gravar automaticamente |
 | Interface moderna | CustomTkinter, validação em tempo real, andamento por etapa, histórico e pendências |
 | Atualização automática | Publicação num servidor de arquivos; cada computador se atualiza ao abrir |
+| Python embutido | O instalador leva o próprio Python: funciona em máquinas sem Python, sem internet e sem administrador |
+| Claims sem anexo | Opção explícita "Este claim não tem anexo" pula o documento DMS; sem ela, o anexo continua obrigatório |
 
 ## Como funciona
 
@@ -135,7 +137,7 @@ Somente `sap_client.py` conhece IDs técnicos de tela. A lógica de negócio fal
 git clone https://github.com/tiagopricilianoo/sap-claim-automation.git
 cd sap-claim-automation
 python -m pip install -r requirements.txt
-python -m pytest -q           # 155 testes, sem precisar de SAP
+python -m pytest -q           # 168 testes, sem precisar de SAP
 python ui.py                  # abre no modo Simulação
 ```
 
@@ -202,7 +204,12 @@ sequenceDiagram
 
 ```powershell
 python publicar.py "\\servidor\pasta\AutomacaoClaims" --nota "o que mudou"
+python publicar.py "\\servidor\pasta\AutomacaoClaims" --com-python   # leva o Python junto
 ```
+
+Com `--com-python`, o Python em uso (com tkinter, pywin32 e customtkinter) é copiado para `<servidor>\python`
+e o `instalar.bat` passa a usá-lo: os usuários não precisam ter Python instalado. A versão *embeddable*
+oficial não serve, porque não inclui o tkinter.
 
 - Usuários rodam `instalar.bat` **direto da pasta do servidor**, uma única vez; o atalho é criado na área de trabalho.
 - O programa roda localmente; o histórico de cada usuário fica em `%LOCALAPPDATA%\ClaimAutomation`.
@@ -214,7 +221,7 @@ python publicar.py "\\servidor\pasta\AutomacaoClaims" --nota "o que mudou"
 python -m pytest -q
 ```
 
-155 testes cobrem configuração, validação, máquina de estados, histórico, o cliente SAP (com objetos COM simulados que reproduzem o comportamento real da árvore, da grade e das janelas), a orquestração em todos os modos, a interface (controlador) e o ciclo de publicação e atualização. Vários são testes de regressão de problemas encontrados no SAP real, como os códigos de nó que mudam entre sessões.
+168 testes cobrem configuração, validação, máquina de estados, histórico, o cliente SAP (com objetos COM simulados que reproduzem o comportamento real da árvore, da grade e das janelas), a orquestração em todos os modos, a interface (controlador) e o ciclo de publicação e atualização. Vários são testes de regressão de problemas encontrados no SAP real, como os códigos de nó que mudam entre sessões.
 
 ## Estrutura do projeto
 

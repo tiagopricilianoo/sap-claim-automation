@@ -32,8 +32,14 @@ def _validar_numero(nome: str, valor: str, maximo: int) -> list[ValidationIssue]
 def _validar_arquivo(req: ClaimRequest, settings: Settings) -> list[ValidationIssue]:
     campo = "arquivo"
     caminho = req.arquivo
+    if req.sem_anexo:
+        if caminho is not None:
+            return [ValidationIssue(campo, "Há um arquivo selecionado, mas a opção 'Este claim não tem anexo' "
+                                           "está marcada. Remova o arquivo ou desmarque a opção.")]
+        return []
     if caminho is None:
-        return [ValidationIssue(campo, "Selecione o arquivo a anexar (vários arquivos: junte em um ZIP).")]
+        return [ValidationIssue(campo, "Selecione o arquivo a anexar (vários arquivos: junte em um ZIP) ou "
+                                       "marque 'Este claim não tem anexo'.")]
     if not caminho.exists():
         return [ValidationIssue(campo, "Arquivo não encontrado no caminho informado.")]
     if not caminho.is_file():

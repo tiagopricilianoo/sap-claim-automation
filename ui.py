@@ -267,11 +267,17 @@ class App(ctk.CTk):
         self.arq_frame = arq
         self.arq_nome = rotulo(arq, "Nenhum arquivo selecionado", 12, cor=T["suave"])
         self.arq_nome.pack(side="left", padx=12, pady=10, fill="x", expand=True)
-        ctk.CTkButton(arq, text="Selecionar…", width=110, height=32, font=fonte(12, "bold"),
-                      fg_color=T["azul"], hover_color=T["azul_hover"],
-                      command=self._escolher_arquivo).pack(side="right", padx=8, pady=6)
+        self.btn_arquivo = ctk.CTkButton(arq, text="Selecionar…", width=110, height=32, font=fonte(12, "bold"),
+                                         fg_color=T["azul"], hover_color=T["azul_hover"],
+                                         command=self._escolher_arquivo)
+        self.btn_arquivo.pack(side="right", padx=8, pady=6)
         rotulo(corpo, "Vários arquivos? Junte em um único ZIP. O nome do arquivo vira a descrição do documento.",
                11, cor=T["suave"], wraplength=560, height=18).pack(anchor="w", padx=12, pady=(3, 0))
+        self.sem_anexo = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(corpo, text="Este claim não tem anexo", variable=self.sem_anexo, font=fonte(12),
+                        text_color=T["texto"], fg_color=T["azul"], hover_color=T["azul_hover"],
+                        border_color=T["borda"], checkbox_width=18, checkbox_height=18,
+                        command=self._mudou_sem_anexo).pack(anchor="w", padx=12, pady=(6, 0))
         self._erro(corpo, "arquivo")
 
         # Valores fixos
@@ -513,6 +519,7 @@ class App(ctk.CTk):
             "ordem": self.ordem.get(),
             "item": self.item.get(),
             "arquivo": self.arquivo,
+            "sem_anexo": self.sem_anexo.get(),
         }
 
     def _mudou(self, campo: str) -> None:
@@ -570,7 +577,17 @@ class App(ctk.CTk):
 
     def _tem_dados(self) -> bool:
         c = self._campos()
-        return any(str(v).strip() for v in c.values())
+        return c["sem_anexo"] or any(str(v).strip() for k, v in c.items() if k != "sem_anexo")
+
+    def _mudou_sem_anexo(self) -> None:
+        if self.sem_anexo.get():
+            self.arquivo = ""
+            self.arq_nome.configure(text="Sem anexo: o documento não será criado", text_color=T["suave"])
+            self.btn_arquivo.configure(state="disabled")
+        else:
+            self.arq_nome.configure(text="Nenhum arquivo selecionado", text_color=T["suave"])
+            self.btn_arquivo.configure(state="normal")
+        self._mudou("arquivo")
 
     def _limpar_tudo(self) -> None:
         """Prepara a tela para um novo claim: formulário, andamento e resultado."""
@@ -597,6 +614,8 @@ class App(ctk.CTk):
             campo.delete(0, "end")
         self.texto.delete("1.0", "end")
         self.arquivo = ""
+        self.sem_anexo.set(False)
+        self.btn_arquivo.configure(state="normal")
         self.arq_nome.configure(text="Nenhum arquivo selecionado", text_color=T["suave"])
         self.rota_info.configure(text="Escolha o tipo para ver a rota de atividades.", text_color=T["suave"])
         self.contador.configure(text=f"0/{self.cfg.limites.descricao_max}", text_color=T["suave"])

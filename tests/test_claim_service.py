@@ -262,3 +262,40 @@ def test_falha_na_bandeira_nao_grava_o_claim(cfg_gravacao, db, request_valido):
     r = servico.executar(request_valido, "AUTOMATICO")
     assert r.estado == E.REVISAO_NECESSARIA          # o documento ZDC já existia
     assert "gravar_nota" not in sap.chamadas
+
+
+# ====================================================================== claim sem anexo
+
+def _sem_anexo(req):
+    return replace(req, arquivo=None, sem_anexo=True)
+
+
+def test_automatico_sem_anexo_pula_o_documento(cfg_gravacao, db, request_valido):
+    servico, sap = _servico(cfg_gravacao, db)
+    r = servico.executar(_sem_anexo(request_valido), "AUTOMATICO")
+    assert r.estado == E.CONCLUIDO and r.documento_dms == ""
+    assert "criar_documento" not in sap.chamadas
+    assert sap.gravacoes == ["NOTA 100063949"]
+    assert "SEM_ANEXO" in [e.tipo for e in db.eventos(r.execucao_id)]
+
+
+def test_sem_anexo_mostra_etapa_pulada(cfg_gravacao, db, request_valido):
+    etapas = []
+    sap = FakeSap()
+    ClaimService(cfg_gravacao, sap, db, progresso=lambda e, s, d: etapas.append((e, s, d))).executar(
+        _sem_anexo(request_valido), "AUTOMATICO")
+    assert ("documento", "ok", "sem anexo · etapa pulada") in etapas
+
+
+def test_falha_depois_sem_anexo_nao_e_revisao(cfg_gravacao, db, request_valido):
+    # Sem documento gravado, uma falha nas atividades não deixa nada no SAP.
+    servico, _ = _servico(cfg_gravacao, db,
+                          falhar_em={"selecionar_atividades": ElementoNaoEncontrado("nó", etapa="árvore")})
+    assert servico.executar(_sem_anexo(request_valido), "AUTOMATICO").estado == E.FALHA_DEFINITIVA
+
+
+def test_assistido_sem_anexo(cfg_gravacao, db, request_valido):
+    servico, sap = _servico(cfg_gravacao, db)
+    r = servico.executar(_sem_anexo(request_valido), "ASSISTIDO")
+    assert r.estado == E.REVISAO_NECESSARIA and "sem anexo" in r.mensagem
+    assert sap.gravacoes == []
