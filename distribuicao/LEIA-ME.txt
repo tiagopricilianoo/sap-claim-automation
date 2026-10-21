@@ -1,0 +1,14 @@
+﻿AUTOMAÇÃO DE CLAIMS (CLM1)
+
+ORÇAMENTISTAS - instalação (uma vez por computador)
+  1. Dê dois cliques em instalar.bat (direto desta pasta do servidor)
+  2. Use o atalho "Automacao de Claims" criado na área de trabalho
+  O programa se atualiza sozinho ao abrir.
+
+  Antes de usar, ative o SAP GUI Scripting no seu SAP:
+  Alt+F12 > Opções > Acessibilidade e Scripts > Scripts > "Habilitar scripts"
+
+RESPONSÁVEL PELA FERRAMENTA - publicar uma atualização
+  Na cópia de desenvolvimento:  python publicar.py "<esta pasta>"
+  Os testes rodam antes; se algum falhar, nada é publicado.
+  NÃO edite os arquivos de app\ direto: use sempre o publicar.py.

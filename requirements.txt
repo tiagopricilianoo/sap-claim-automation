@@ -1,0 +1,8 @@
+# Necessário para conversar com o SAP GUI (Entrega 2 em diante)
+pywin32>=312
+
+# Interface gráfica
+customtkinter>=5.2
+
+# Apenas para desenvolvimento e testes
+pytest>=8
