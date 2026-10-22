@@ -511,7 +511,13 @@ class SapClient:
         self._el(ARQ_NOME, "nome do arquivo").text = arquivo.name
         self._el(ARQ_OK, "confirmar arquivo").press()
         self._esperar_livre()
-        if self._s.Children.Count > 1:          # o SAP pergunta a aplicação (ex.: PDF)
+        if self._s.Children.Count > 1:          # o SAP pergunta a aplicação (ex.: PDF, ZIP)
+            if not aplicacao:
+                raise ValorRejeitado(
+                    f"O SAP pediu a aplicação para '{arquivo.suffix or arquivo.name}', mas esse tipo não está em "
+                    "[aplicacao_por_extensao] do settings.ini. Nada foi gravado.",
+                    etapa="aplicação do original",
+                )
             self._escolher_na_lista(aplicacao, "aplicação do original")
         self._falhar_se_erro("anexar arquivo")
 

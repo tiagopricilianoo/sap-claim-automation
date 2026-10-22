@@ -64,7 +64,7 @@ class Settings:
     prioridade: str
     doc_tipo: str
     doc_laboratorio: str
-    doc_aplicacao: str
+    doc_aplicacao: str               # padrão antigo (usado só se a tabela por extensão faltar)
     raiz_arvore: str
     modo: str
     automatico_habilitado: bool
@@ -72,6 +72,13 @@ class Settings:
     avisos_aceitos: tuple[str, ...]
     rotas: dict[str, RouteConfig] = field(default_factory=dict)
     pasta_dados: Path = Path(".")
+    aplicacoes: dict[str, str] = field(default_factory=dict)   # ".zip" -> "ZIP"
+
+    def aplicacao_para(self, arquivo: Path | None) -> str:
+        """Código da aplicação a escolher se o SAP perguntar; "" = tipo não configurado."""
+        if arquivo is None:
+            return ""
+        return self.aplicacoes.get(arquivo.suffix.lower(), "")
 
     def rota(self, chave: str) -> RouteConfig:
         try:
@@ -164,6 +171,21 @@ def _carregar_rotas(
     return rotas
 
 
+def _carregar_aplicacoes(parser: configparser.ConfigParser) -> dict[str, str]:
+    """[aplicacao_por_extensao]: .pdf = PDF, .zip = ZIP ..."""
+    if not parser.has_section("aplicacao_por_extensao"):
+        return {".pdf": _obrigatorio(parser, "documento", "aplicacao").upper()}
+    tabela: dict[str, str] = {}
+    for extensao, codigo in parser.items("aplicacao_por_extensao"):
+        extensao = extensao.strip().lower()
+        if not extensao.startswith("."):
+            extensao = "." + extensao
+        if not codigo.strip():
+            raise ConfigError(f"[aplicacao_por_extensao] {extensao} sem código de aplicação")
+        tabela[extensao] = codigo.strip().upper()
+    return tabela
+
+
 def load_settings(caminho: Path | str = CAMINHO_PADRAO) -> Settings:
     caminho = Path(caminho)
     parser = configparser.ConfigParser(interpolation=None)
@@ -206,6 +228,7 @@ def load_settings(caminho: Path | str = CAMINHO_PADRAO) -> Settings:
         avisos_aceitos=avisos,
         rotas=_carregar_rotas(parser, atividades),
         pasta_dados=Path(pasta) if pasta else _pasta_dados_padrao(),
+        aplicacoes=_carregar_aplicacoes(parser),
     )
 
 

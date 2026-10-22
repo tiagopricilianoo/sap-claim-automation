@@ -299,3 +299,17 @@ def test_assistido_sem_anexo(cfg_gravacao, db, request_valido):
     r = servico.executar(_sem_anexo(request_valido), "ASSISTIDO")
     assert r.estado == E.REVISAO_NECESSARIA and "sem anexo" in r.mensagem
     assert sap.gravacoes == []
+
+
+def test_zip_envia_aplicacao_zip(cfg_gravacao, db, request_valido, tmp_path):
+    arquivo = tmp_path / "anexos (3).zip"
+    arquivo.write_bytes(b"PK\x03\x04")
+    servico, sap = _servico(cfg_gravacao, db)
+    r = servico.executar(replace(request_valido, arquivo=arquivo), "AUTOMATICO")
+    assert r.estado == E.CONCLUIDO and sap.aplicacao_recebida == "ZIP"
+
+
+def test_pdf_envia_aplicacao_pdf(cfg_gravacao, db, request_valido):
+    servico, sap = _servico(cfg_gravacao, db)
+    servico.executar(request_valido, "AUTOMATICO")
+    assert sap.aplicacao_recebida == "PDF"

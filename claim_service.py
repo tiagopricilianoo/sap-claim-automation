@@ -198,7 +198,7 @@ class ClaimService:
                 self._db.registrar_evento(eid, "DOCUMENTO_ENVIADO", req.nome_arquivo)
                 documento = self._sap.criar_documento(
                     tipo=self._cfg.doc_tipo, descricao=req.nome_arquivo, laboratorio=self._cfg.doc_laboratorio,
-                    arquivo=req.arquivo, aplicacao=self._cfg.doc_aplicacao,
+                    arquivo=req.arquivo, aplicacao=self._cfg.aplicacao_para(req.arquivo),
                 )
                 self._db.registrar_documento(eid, documento)
                 self._ok("documento", f"{self._cfg.doc_tipo} {documento}")

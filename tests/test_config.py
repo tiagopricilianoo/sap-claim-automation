@@ -105,3 +105,32 @@ def test_arquivo_inexistente(tmp_path):
 def test_testes_independem_da_configuracao_de_uso(settings):
     # Mesmo com a gravação habilitada no settings.ini real, os testes partem do padrão seguro.
     assert settings.automatico_habilitado is False and settings.modo == "SIMULACAO"
+
+
+# ---------------------------------------------------------------- aplicação por extensão
+
+def test_settings_real_tem_pdf_e_zip(settings):
+    # Trava de publicação: sem estas linhas no settings.ini, ZIP e PDF param na janela de aplicação.
+    assert settings.aplicacoes.get(".pdf") == "PDF"
+    assert settings.aplicacoes.get(".zip") == "ZIP"
+
+
+def test_aplicacao_por_extensao(settings):
+    from pathlib import Path
+    assert settings.aplicacao_para(Path("Proposta.PDF")) == "PDF"
+    assert settings.aplicacao_para(Path("anexos (3).zip")) == "ZIP"
+    assert settings.aplicacao_para(Path("planilha.xlsx")) == ""
+    assert settings.aplicacao_para(None) == ""
+
+
+def test_sem_secao_usa_padrao_antigo(tmp_path, texto_ini):
+    import re
+    sem_secao = re.sub(r"\[aplicacao_por_extensao\][\s\S]*?(?=\n\[)", "", texto_ini)
+    caminho = tmp_path / "s.ini"
+    caminho.write_text(sem_secao, encoding="utf-8")
+    assert load_settings(caminho).aplicacoes == {".pdf": "PDF"}
+
+
+def test_extensao_sem_ponto_e_normalizada(tmp_path, texto_ini):
+    caminho = _ini(tmp_path, texto_ini, ".zip = ZIP", "zip = zip")
+    assert load_settings(caminho).aplicacoes[".zip"] == "ZIP"

@@ -87,6 +87,7 @@ class FakeSap:
     def criar_documento(self, *, tipo: str, descricao: str, laboratorio: str,
                         arquivo: Path, aplicacao: str) -> str:
         self._passo("criar_documento")
+        self.aplicacao_recebida = aplicacao
         self.gravacoes.append(f"DOCUMENTO {tipo} {self.proximo_documento}")
         return self.proximo_documento
 

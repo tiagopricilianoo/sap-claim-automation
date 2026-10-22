@@ -607,6 +607,28 @@ def test_escolhe_pdf_pelo_texto_e_nao_pela_posicao(settings):
     assert janela.escolhidos[-1].upper().startswith("PDF ")
 
 
+def test_zip_escolhe_zip_pelo_texto(settings):
+    """Script5 (22/10/2026): o ZIP também abre a janela de aplicações."""
+    from pathlib import PureWindowsPath
+    cliente, janela = _pronto(settings)
+    janela.lista_aplicacoes = ["Apl Descrição", "DDE PDF German", "TXT Editor", "ZIP Arquivo compactado"]
+    _doc_ok(janela)
+    numero = cliente.criar_documento(tipo="ZDC", descricao="anexos.zip", laboratorio="L01",
+                                     arquivo=PureWindowsPath(r"C:\Users\usuario\Downloads\anexos.zip"), aplicacao="ZIP")
+    assert numero == "20000263669"
+    assert janela.escolhidos[-1] == "ZIP Arquivo compactado"
+
+
+def test_tipo_nao_configurado_que_abre_janela_para_antes_de_gravar(settings):
+    from pathlib import PureWindowsPath
+    cliente, janela = _pronto(settings)
+    janela.lista_aplicacoes = ["DWG AutoCAD", "TIF Imagem"]
+    with pytest.raises(ValorRejeitado, match="aplicacao_por_extensao"):
+        cliente.criar_documento(tipo="ZDC", descricao="desenho.dwg", laboratorio="L01",
+                                arquivo=PureWindowsPath(r"C:\x\desenho.dwg"), aplicacao="")
+    assert sc.TECLA_GRAVAR not in janela.vkeys
+
+
 def test_sem_janela_de_aplicacao_para_excel(settings):
     cliente, janela = _pronto(settings)
     _doc_ok(janela)                       # lista_aplicacoes vazia: SAP atribui sozinho (XLS)
