@@ -19,6 +19,7 @@ from pathlib import Path
 
 from sap_gateway import (
     AtividadeSelecionada,
+    LinhaPreenchida,
     Popup,
     SessaoIndisponivel,
     SessionInfo,
@@ -40,6 +41,12 @@ class FakeSap:
     grade: list[dict[str, str]] | None = None   # força o conteúdo devolvido pela grade
     status_apos_gravar: StatusMessage | None = None   # força a resposta da gravação
     atraso_s: float = 0.0                         # pausa por etapa (demonstração na interface)
+    itens_cotacao: list[str] = field(default_factory=lambda: ["10"])   # itens já existentes na cotação
+    linha_lida: dict[str, str] | None = None      # força o que é "lido" da linha (material/centro)
+    status_apos_gravar_cotacao: StatusMessage | None = None
+    proxima_cotacao: str = "21800001"
+    janela_exportacao: str = ""                   # texto da janela extra depois do endereço (exportação)
+    status_validade: StatusMessage = field(default_factory=lambda: StatusMessage("", ""))
 
     chamadas: list[str] = field(default_factory=list, init=False)
     gravacoes: list[str] = field(default_factory=list, init=False)
@@ -64,11 +71,67 @@ class FakeSap:
             raise SessaoIndisponivel("SAP GUI não encontrado (simulado).", etapa="sessao")
         return self.sessao_info
 
+    def abrir_cotacao(self, cotacao: str) -> None:
+        self._passo("abrir_cotacao")
+        self._cotacao = cotacao
+
+    def preencher_linha(self, *, material: str, centro: str, quantidade: str) -> LinhaPreenchida:
+        self._passo("preencher_linha")
+        numeros = [int(i) for i in self.itens_cotacao if i.isdigit()]
+        item = str((max(numeros) // 10 + 1) * 10 if numeros else 10)
+        lido = {"material": material, "centro": centro, **(self.linha_lida or {})}
+        self._linha_pendente = item
+        return LinhaPreenchida(item=item, material=lido["material"], centro=lido["centro"],
+                               status=StatusMessage("", ""))
+
+    def gravar_cotacao(self, cotacao: str) -> StatusMessage:
+        self._passo("gravar_cotacao")
+        if self.status_apos_gravar_cotacao is not None:
+            return self.status_apos_gravar_cotacao
+        self.itens_cotacao.append(self._linha_pendente)
+        self.gravacoes.append(f"LINHA {cotacao}/{self._linha_pendente}")
+        return StatusMessage("S", f"Cotação {cotacao} foi gravado(a)", "V1", "311", (cotacao,))
+
+    # ---- cotação nova (VA21)
+    def iniciar_cotacao(self, **dados: str) -> None:
+        self._passo("iniciar_cotacao")
+        self.cotacao_dados = dict(dados)
+
+    def preencher_cliente(self, **dados: str) -> Popup | None:
+        self._passo("preencher_cliente")
+        self.cotacao_cliente = dict(dados)
+        return Popup(self.janela_exportacao, "") if self.janela_exportacao and dados.get("codigo_postal") else None
+
+    def preencher_validade(self, **dados: str) -> StatusMessage:
+        self._passo("preencher_validade")
+        self.cotacao_validade = dict(dados)
+        return self.status_validade
+
+    def preencher_linhas_novas(self, linhas: list[tuple[str, str, str]]) -> list[LinhaPreenchida]:
+        self._passo("preencher_linhas_novas")
+        self.cotacao_linhas = list(linhas)
+        return [LinhaPreenchida(str(10 * (i + 1)), (self.linha_lida or {}).get("material", m),
+                                (self.linha_lida or {}).get("centro", c), StatusMessage("", ""))
+                for i, (m, c, _) in enumerate(linhas)]
+
+    def preencher_cabecalho(self, **dados: str) -> StatusMessage:
+        self._passo("preencher_cabecalho")
+        self.cotacao_cabecalho = dict(dados)
+        return StatusMessage("", "")
+
+    def gravar_cotacao_nova(self) -> StatusMessage:
+        self._passo("gravar_cotacao_nova")
+        if self.status_apos_gravar_cotacao is not None:
+            return self.status_apos_gravar_cotacao
+        self.gravacoes.append(f"COTACAO {self.proxima_cotacao}")
+        return StatusMessage("S", f"Cotação {self.proxima_cotacao} foi gravado(a)", "V1", "311")
+
     def abrir_criacao(self, tipo_nota: str) -> None:
         self._passo("abrir_criacao")
 
     def preencher_nota(self, **campos: str) -> None:
         self._passo("preencher_nota")
+        self.nota_preenchida = dict(campos)
 
     def enter(self) -> StatusMessage:
         self._passo("enter")

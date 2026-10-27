@@ -19,7 +19,9 @@ O que faz:
    simulador), com o settings.ini em modo de uso (AUTOMATICO, gravação ligada,
    histórico na pasta padrão de cada usuário).
 3. Copia para uma pasta temporária no servidor e só então troca pela atual.
-   A versão anterior fica guardada em app_anterior (para voltar, se precisar).
+   A versão anterior fica guardada em app_anterior. Para VOLTAR uma versão, não renomeie
+   pastas no servidor (os computadores ignoram número menor): publique o código antigo
+   de novo, que ele recebe um número maior.
 4. Aumenta o número da versão. Os orçamentistas recebem ao abrir o programa.
 """
 
@@ -39,18 +41,43 @@ RAIZ = Path(__file__).resolve().parent
 ARQUIVOS_DO_PROGRAMA = (
     "ui.py", "controlador.py", "claim_service.py", "config.py", "models.py", "validators.py",
     "state.py", "storage.py", "sap_gateway.py", "sap_client.py", "logger_config.py",
-    "verificar_sap.py", "sobre.py", "tema.ini",
+    "verificar_sap.py", "sobre.py", "tema.ini", "tema_ui.py", "ui_cotacao.py", "cotacao.py", "cotacao_service.py",
+    "pastas.py", "storage_cotacao.py",
 )
 ASSETS = ("logo.png", "logo_40.png", "logo_80.png", "app.ico")
-REQUIREMENTS_PRODUCAO = "pywin32>=312\ncustomtkinter>=5.2\n"
+# Versões FIXAS: um pip nos computadores nunca pode trazer uma biblioteca nova que derrube a tela.
+# Na publicação vale a versão testada aqui (a instalada nesta máquina); sem ela, a faixa conhecida.
+BIBLIOTECAS_PRODUCAO = {"pywin32": "pywin32>=312,<400", "customtkinter": "customtkinter>=5.2,<5.3"}
+
+
+def requirements_producao() -> str:
+    from importlib import metadata
+    linhas = []
+    for nome, faixa in BIBLIOTECAS_PRODUCAO.items():
+        try:
+            linhas.append(f"{nome}=={metadata.version(nome)}")
+        except metadata.PackageNotFoundError:
+            linhas.append(faixa)
+    return "\n".join(linhas) + "\n"
+
+
+REQUIREMENTS_PRODUCAO = requirements_producao()
 
 
 def proxima_versao(atual: str) -> str:
     partes = [int(p) for p in re.findall(r"\d+", atual)][:3]
-    if len(partes) != 3:
+    if not partes:
         return "1.0.0"
+    partes += [0] * (3 - len(partes))           # "1.2" -> 1.2.1 (nunca volta para 1.0.0)
     partes[2] += 1
     return ".".join(map(str, partes))
+
+
+def versao_tupla(versao: str) -> tuple[int, ...]:
+    """(1, 2, 0) para '1.2.0'; () se não for só números separados por ponto."""
+    if not re.fullmatch(r"\d+(\.\d+)*", versao or ""):
+        return ()
+    return tuple(int(p) for p in versao.split("."))
 
 
 def settings_de_producao(texto: str) -> str:
@@ -75,7 +102,27 @@ def montar_pacote(origem: Path, destino: Path, versao: str) -> None:
     (destino / "requirements.txt").write_text(REQUIREMENTS_PRODUCAO, encoding="utf-8")
     texto = (origem / "settings.ini").read_text(encoding="utf-8")
     (destino / "settings.ini").write_text(settings_de_producao(texto), encoding="utf-8")
+    escrever_manifesto(destino, versao)
     (destino / "versao.txt").write_text(versao + "\n", encoding="utf-8")   # por último
+
+
+MANIFESTO = "manifesto.json"
+
+
+def _sha256(arquivo: Path) -> str:
+    import hashlib
+    return hashlib.sha256(arquivo.read_bytes()).hexdigest()
+
+
+def escrever_manifesto(pasta: Path, versao: str) -> None:
+    """Lista (com SHA-256) de TODOS os arquivos do pacote. O computador confere antes de trocar a versão:
+    cópia incompleta/corrompida ou arquivo a mais (ex.: um .py colocado na pasta) = atualização recusada."""
+    import json
+    arquivos = {p.relative_to(pasta).as_posix(): _sha256(p) for p in sorted(pasta.rglob("*"))
+                if p.is_file() and p.name not in (MANIFESTO, "versao.txt")
+                and p.name.lower() not in ("thumbs.db", "desktop.ini", "ehthumbs.db", ".ds_store")}
+    (pasta / MANIFESTO).write_text(json.dumps({"versao": versao, "arquivos": arquivos}, indent=1),
+                                   encoding="utf-8")
 
 
 def rodar_testes() -> bool:
@@ -83,21 +130,53 @@ def rodar_testes() -> bool:
     return subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=RAIZ).returncode == 0
 
 
+MARCADOR = "PASTA_DA_AUTOMACAO_COMERCIAL.txt"
+
+
+def exigir_pasta_de_publicacao(servidor: Path) -> None:
+    """Só apaga/renomeia dentro de uma pasta que é da publicação: vazia (primeira vez) ou já com o
+    instalar.bat/marcador. Um caminho digitado errado (ex.: a pasta do grupo) é recusado sem mexer em nada."""
+    servidor = Path(servidor)
+    if not servidor.is_dir():
+        raise ValueError(f"Pasta não encontrada: {servidor}")
+    # Marcador, ou uma publicação anterior deste programa (instalar.bat + app/versao.txt + iniciar.py).
+    nossa = (servidor / MARCADOR).exists() or all(
+        (servidor / n).exists() for n in ("instalar.bat", "instalar.py", "app/versao.txt", "app/iniciar.py"))
+    if not nossa and any(servidor.iterdir()):
+        raise ValueError(f"{servidor} não é a pasta de publicação do programa (não tem {MARCADOR} nem "
+                         "instalar.bat). Nada foi alterado.")
+    if not (servidor / MARCADOR).exists():
+        (servidor / MARCADOR).write_text("Pasta de publicação da Automação Comercial (publicar.py).\n",
+                                         encoding="utf-8")
+
+
+def _apagar(pasta: Path) -> None:
+    if pasta.is_symlink():
+        raise ValueError(f"{pasta} é um atalho de pasta; não vou apagar. Nada foi alterado.")
+    shutil.rmtree(pasta)
+
+
 def publicar(servidor: Path, versao: str | None = None, nota: str = "", origem: Path = RAIZ) -> str:
+    exigir_pasta_de_publicacao(servidor)
     app, temporaria, anterior = servidor / "app", servidor / "app_publicando", servidor / "app_anterior"
     atual = ""
     if (app / "versao.txt").exists():
         atual = (app / "versao.txt").read_text(encoding="utf-8").strip()
-    nova = versao or (proxima_versao(atual) if atual else "1.0.0")
+    nova = (versao or (proxima_versao(atual) if atual else "1.0.0")).strip()
     if nova == atual:
         raise ValueError(f"A versão {nova} já está publicada.")
+    if not versao_tupla(nova):
+        raise ValueError(f"Versão {nova!r} inválida: use só números, como 1.2.3. Os computadores ignoram outra forma.")
+    if versao_tupla(atual) and versao_tupla(nova) <= versao_tupla(atual):
+        raise ValueError(f"A versão {nova} não é maior que a publicada ({atual}): os computadores a ignorariam. "
+                         "Para voltar uma versão, republique o código antigo com um número MAIOR.")
 
     if temporaria.exists():
-        shutil.rmtree(temporaria)
+        _apagar(temporaria)
     montar_pacote(origem, temporaria, nova)
 
     if anterior.exists():
-        shutil.rmtree(anterior)
+        _apagar(anterior)
     if app.exists():
         app.rename(anterior)
     try:
@@ -148,14 +227,15 @@ def publicar_runtime(servidor: Path, runtime: Path | None = None) -> str:
     problemas = verificar_runtime(runtime)
     if problemas:
         raise ValueError("Python não pode ser embutido: " + "; ".join(problemas))
+    exigir_pasta_de_publicacao(servidor)
     destino, temporaria, anterior = servidor / "python", servidor / "python_publicando", servidor / "python_anterior"
     if temporaria.exists():
-        shutil.rmtree(temporaria)
+        _apagar(temporaria)
     shutil.copytree(runtime, temporaria, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "pytest*", "_pytest"))
     descricao = f"{sys.version.split()[0]} | {runtime}"
     (temporaria / "runtime.txt").write_text(descricao + "\n", encoding="utf-8")
     if anterior.exists():
-        shutil.rmtree(anterior)
+        _apagar(anterior)
     if destino.exists():
         destino.rename(anterior)
     try:

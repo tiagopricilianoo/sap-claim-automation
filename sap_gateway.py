@@ -59,6 +59,15 @@ class AtividadeSelecionada:
     responsavel: str  # "" = deixar o SAP preencher
 
 
+@dataclass(frozen=True)
+class LinhaPreenchida:
+    """Linha nova da cotação, lida da tela DEPOIS do Enter (ainda não gravada)."""
+    item: str
+    material: str
+    centro: str
+    status: StatusMessage
+
+
 # ---------------------------------------------------------------- erros
 
 class SapError(Exception):
@@ -101,6 +110,33 @@ class ResultadoIncerto(SapError):
 class SapGateway(Protocol):
     def sessao(self) -> SessionInfo: ...
 
+    # ---- cotação (VA22): linha nova antes do claim
+    def abrir_cotacao(self, cotacao: str) -> None:
+        """VA22 -> número da cotação -> Enter (abre a lista de itens). Não grava."""
+
+    def preencher_linha(self, *, material: str, centro: str, quantidade: str) -> LinhaPreenchida:
+        """Acrescenta a linha no próximo item livre, confirma com Enter e confere. Não grava."""
+
+    def gravar_cotacao(self, cotacao: str) -> StatusMessage:
+        """GRAVA a cotação ("Gravar documento incompleto" -> Gravar). Pode levantar ResultadoIncerto."""
+
+    # ---- cotação nova (VA21)
+    def iniciar_cotacao(self, *, tipo_documento: str, organizacao: str, canal: str, setor: str,
+                        escritorio: str, equipe: str) -> None: ...
+
+    def preencher_cliente(self, *, emissor: str, titulo: str, nome: str, cidade: str,
+                          codigo_postal: str) -> Popup | None: ...
+
+    def preencher_validade(self, *, validade: str, referencia: str) -> StatusMessage: ...
+
+    def preencher_linhas_novas(self, linhas: list[tuple[str, str, str]]) -> list[LinhaPreenchida]: ...
+
+    def preencher_cabecalho(self, *, utilizacao: str, data: str, hora: str) -> StatusMessage: ...
+
+    def gravar_cotacao_nova(self) -> StatusMessage:
+        """GRAVA a cotação nova. Pode levantar ResultadoIncerto."""
+
+    # ---- claim (CLM1)
     def abrir_criacao(self, tipo_nota: str) -> None:
         """CLM1 -> tipo de nota -> Enter (abre a tela principal da nota)."""
 

@@ -99,7 +99,7 @@ def test_ensaio_inclui_atividades_da_rota(settings, db, request_valido):
 
 def test_texto_diferente_na_grade_vira_conferencia(settings, db, request_valido):
     grade = [{"DESC_ATIV": "ANALISE TECNICA", "SUB_GRUPO": "GRP-ENG", "RESP": "GRP"},
-             {"DESC_ATIV": "PRODUTO A", "SUB_GRUPO": "GRP-COM", "RESP": "OUTRO"}]
+             {"DESC_ATIV": "PRODUTO_A", "SUB_GRUPO": "GRP-COM", "RESP": "OUTRO"}]
     servico, _ = _servico(settings, db, grade=grade)
     r = servico.ensaio(request_valido)
     assert r.estado == E.ENSAIO_CONCLUIDO
@@ -240,7 +240,7 @@ def test_simulacao_faz_o_fluxo_completo_sem_habilitar(settings, db, request_vali
 
 def test_conferencia_divergente_bloqueia_gravacao(cfg_gravacao, db, request_valido):
     grade = [{"DS_ATIVIDADE": "ITEM AUXILIAR 2", "SUB_GRUPO": "GRP-ENG", "RESP": "GRUPO-ENG"},
-             {"DS_ATIVIDADE": "PRODUTO A", "SUB_GRUPO": "GRP-COM", "RESP": "USUARIO1"}]
+             {"DS_ATIVIDADE": "PRODUTO_A", "SUB_GRUPO": "GRP-COM", "RESP": "USUARIO1"}]
     servico, sap = _servico(cfg_gravacao, db, grade=grade)
     r = servico.executar(request_valido, "AUTOMATICO")
     assert r.estado == E.REVISAO_NECESSARIA           # documento ZDC já existia

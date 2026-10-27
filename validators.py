@@ -7,6 +7,7 @@ Nenhuma função aqui corrige valores: só aponta o problema.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 from config import Settings
@@ -54,13 +55,20 @@ def _validar_arquivo(req: ClaimRequest, settings: Settings) -> list[ValidationIs
         return [ValidationIssue(campo, "O arquivo está vazio.")]
 
     maximo = settings.limites.descricao_documento_max
-    if len(caminho.name) > maximo:
+    import unicodedata
+    tamanho_nome = tamanho_sap(unicodedata.normalize("NFC", caminho.name))     # como o SAP conta (UTF-16)
+    if tamanho_nome > maximo:
         return [ValidationIssue(
             campo,
             f"O nome do arquivo vira a descrição do documento e pode ter até {maximo} "
-            f"caracteres (atual: {len(caminho.name)}). Renomeie o arquivo.",
+            f"caracteres (atual: {tamanho_nome}; emoji conta 2). Renomeie o arquivo.",
         )]
     return []
+
+
+def tamanho_sap(texto: str) -> int:
+    """Tamanho como o SAP conta (UTF-16): emoji e outros símbolos fora do BMP ocupam 2 posições."""
+    return len(texto.encode("utf-16-le")) // 2
 
 
 def validate(req: ClaimRequest, settings: Settings) -> list[ValidationIssue]:
@@ -74,16 +82,30 @@ def validate(req: ClaimRequest, settings: Settings) -> list[ValidationIssue]:
 
     if not req.descricao:
         problemas.append(ValidationIssue("descricao", "Campo obrigatório."))
-    elif len(req.descricao) > settings.limites.descricao_max:
+    elif any(unicodedata.category(c) == "Cc" for c in req.descricao):
+        problemas.append(ValidationIssue("descricao", "A descrição é uma linha só: sem quebra de linha, tabulação "
+                                         "ou caractere invisível (comum ao colar de PDF)."))
+    elif tamanho_sap(req.descricao) > settings.limites.descricao_max:
         problemas.append(ValidationIssue(
             "descricao",
-            f"Máximo de {settings.limites.descricao_max} caracteres (informado: {len(req.descricao)}).",
+            f"Máximo de {settings.limites.descricao_max} caracteres (informado: {tamanho_sap(req.descricao)}; "
+            "emoji conta 2).",
         ))
 
     if not req.texto_livre:
         problemas.append(ValidationIssue("texto_livre", "Campo obrigatório."))
 
     problemas += _validar_numero("ordem", req.ordem, settings.limites.ordem_max)
-    problemas += _validar_numero("item", req.item, settings.limites.item_max)
+    if req.linha_nova:
+        rota = settings.rotas.get(req.tipo)
+        if rota is not None and not rota.material:
+            problemas.append(ValidationIssue(
+                "item", f"O tipo '{rota.rotulo}' não tem material de linha nova no settings.ini."))
+    else:
+        problemas += _validar_numero("item", req.item, settings.limites.item_max)
+        if not problemas or problemas[-1].campo != "item":
+            if req.item.strip("0") == "" and req.item:
+                problemas.append(ValidationIssue("item", "O item 0 é o cabeçalho da cotação: informe o item da linha "
+                                                 "(10, 20…)."))
     problemas += _validar_arquivo(req, settings)
     return problemas

@@ -91,13 +91,21 @@ def test_execucao_inexistente(db):
 
 
 def test_duplicidade_por_ordem_item(db, request_valido):
-    primeira = db.criar_execucao(request_valido, "SIMULACAO")
+    primeira = db.criar_execucao(request_valido, "AUTOMATICO")
     assert db.possiveis_duplicidades("1234567", "10") == []   # só RECEBIDO: não bloqueia
     _caminho_feliz(db, primeira)
 
     assert [e.id for e in db.possiveis_duplicidades("1234567", "10")] == [primeira]
     assert db.possiveis_duplicidades("1234567", "20") == []
     assert db.possiveis_duplicidades("1234567", "10", ignorar_id=primeira) == []
+
+
+def test_simulacao_so_bloqueia_outra_simulacao(db, request_valido):
+    # Revisão de 27/10/2026: uma simulação nunca gravou no SAP e não pode barrar o claim real.
+    sim = db.criar_execucao(request_valido, "SIMULACAO")
+    _caminho_feliz(db, sim)
+    assert db.possiveis_duplicidades("1234567", "10", modo="AUTOMATICO") == []
+    assert [e.id for e in db.possiveis_duplicidades("1234567", "10", modo="SIMULACAO")] == [sim]
 
 
 def test_ensaio_nao_conta_como_duplicidade(db, request_valido):

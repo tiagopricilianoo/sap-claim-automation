@@ -20,7 +20,7 @@ from claim_service import ClaimService, Resultado
 from config import Settings
 from models import ClaimRequest
 from sap_gateway import SapError, SapGateway
-from state import Estado
+from state import Estado, pode_transitar
 from storage import Execucao, Storage
 from validators import ValidationIssue, validate
 
@@ -33,6 +33,11 @@ ROTULO_MODO = {"SIMULACAO": "Simulação", "ENSAIO": "Ensaio", "ASSISTIDO": "Ass
 
 def modos_da_interface(settings: Settings) -> tuple[str, ...]:
     return MODOS_DA_INTERFACE + (MODOS_COM_GRAVACAO if settings.automatico_habilitado else ())
+
+
+def modos_cotacao_da_interface(settings: Settings) -> tuple[str, ...]:
+    """Cotação: sem Assistido (as pastas dependem do número gravado)."""
+    return MODOS_DA_INTERFACE + (("AUTOMATICO",) if settings.automatico_habilitado else ())
 
 ROTULO_ESTADO = {
     Estado.RECEBIDO: "Recebido",
@@ -64,7 +69,8 @@ class Evento:
     etapa: str = ""
     situacao: str = ""        # ativo | ok | falha
     detalhe: str = ""
-    resultado: Resultado | None = None
+    resultado: object | None = None      # Resultado (claim) ou ResultadoCotacao
+    origem: str = "claim"                # claim | cotacao
 
 
 # ----------------------------------------------------------------------- formulário
@@ -78,6 +84,7 @@ def montar_request(campos: dict[str, object]) -> ClaimRequest:
         item=campos.get("item", ""),
         arquivo=campos.get("arquivo", ""),
         sem_anexo=bool(campos.get("sem_anexo", False)),
+        linha_nova=bool(campos.get("linha_nova", False)),
     )
 
 
@@ -111,7 +118,7 @@ def resumo_arquivo(caminho: str) -> str:
 def linha_historico(e: Execucao) -> tuple[str, ...]:
     quando = datetime.fromisoformat(e.criado_em).strftime("%d/%m %H:%M")
     duracao = f"{e.duracao_segundos:.0f}s" if e.duracao_segundos is not None else "—"
-    return (quando, ROTULO_ESTADO.get(e.estado, e.estado.value), e.tipo, f"{e.ordem}/{e.item}",
+    return (quando, ROTULO_ESTADO.get(e.estado, e.estado.value), e.tipo, f"{e.ordem}/{e.item or 'nova'}",
             e.numero_nota or "—", duracao, e.id)
 
 
@@ -123,31 +130,126 @@ def pendencias(storage: Storage) -> list[Execucao]:
     return interrompidas + [e for e in storage.pendentes() if e.id not in vistos]
 
 
+def _caminho_de_resolucao(atual: Estado, final: Estado) -> list[Estado]:
+    """Transições até o estado final, SEMPRE passando por revisão (decisão humana).
+
+    O caminho inteiro é conferido ANTES de gravar qualquer coisa: se não der, nada muda.
+    """
+    caminho = {
+        Estado.PRONTO_PARA_EXECUCAO: [Estado.EXECUTANDO, Estado.REVISAO_NECESSARIA],
+        Estado.EXECUTANDO: [Estado.REVISAO_NECESSARIA],
+        Estado.AGUARDANDO_CONFIRMACAO: [Estado.REVISAO_NECESSARIA],
+        Estado.REVISAO_NECESSARIA: [],
+    }.get(atual)
+    if caminho is None:
+        raise ValueError(f"Esta execução não está pendente ({ROTULO_ESTADO.get(atual, atual.value)}).")
+    caminho = caminho + [final]
+    anterior = atual
+    for proximo in caminho:
+        if not pode_transitar(anterior, proximo):
+            raise ValueError(f"Não é possível resolver a partir de {ROTULO_ESTADO.get(atual, atual.value)}.")
+        anterior = proximo
+    return caminho
+
+
+def _lote(storage):
+    """Transação única do storage (ou nada, para storages de teste sem lote())."""
+    import contextlib
+    lote = getattr(storage, "lote", None)
+    return lote() if callable(lote) else contextlib.nullcontext()
+
+
 def resolver_pendencia(storage: Storage, execucao_id: str, *, criado: bool, numero_nota: str = "",
-                       observacao: str = "") -> None:
+                       observacao: str = "", linha_existe: bool | None = None) -> None:
     """Decisão humana, depois de conferir no SAP.
 
     criado=True  -> o claim existe no SAP: CONCLUIDO, com o número informado.
     criado=False -> o claim NÃO existe: FALHA_DEFINITIVA (libera nova execução da ordem/item).
+    linha_existe -> só para execução de linha nova com gravação da linha sem confirmação ('?20'):
+                    True = a linha existe na VA22, False = não existe, None = não informado (a linha
+                    continua contando como "talvez exista" e bloqueia outra linha nova).
     """
     numero = numero_nota.strip()
     if criado and (not numero.isdigit() or not numero.isascii()):
         raise ValueError("Informe o número da nota (somente dígitos).")
-    atual = storage.obter(execucao_id).estado
-    if atual not in (Estado.REVISAO_NECESSARIA, Estado.AGUARDANDO_CONFIRMACAO,
-                     Estado.EXECUTANDO, Estado.PRONTO_PARA_EXECUCAO):
-        raise ValueError(f"Esta execução não está pendente ({ROTULO_ESTADO.get(atual, atual.value)}).")
-    if atual == Estado.PRONTO_PARA_EXECUCAO:
-        storage.transitar(execucao_id, Estado.EXECUTANDO, "retomada para resolução manual")
-        atual = Estado.EXECUTANDO
-    if atual in (Estado.EXECUTANDO, Estado.AGUARDANDO_CONFIRMACAO) and not criado:
-        storage.transitar(execucao_id, Estado.REVISAO_NECESSARIA, "resolução manual")
+    execucao = storage.obter(execucao_id)
+    final = Estado.CONCLUIDO if criado else Estado.FALHA_DEFINITIVA
+    caminho = _caminho_de_resolucao(execucao.estado, final)      # confere tudo antes de gravar
     detalhe = "resolvido pelo usuário" + (f": {observacao.strip()}" if observacao.strip() else "")
+    linha = execucao.linha_criada or ""
     if criado:
-        storage.registrar_nota(execucao_id, numero)
-        storage.transitar(execucao_id, Estado.CONCLUIDO, f"{detalhe}; nota {numero} conferida no SAP")
-    else:
-        storage.transitar(execucao_id, Estado.FALHA_DEFINITIVA, f"{detalhe}; claim não existe no SAP")
+        if numero.lstrip("0") == (execucao.ordem or "").lstrip("0"):
+            raise ValueError(f"{numero} é o número da cotação/ordem. Informe o número da NOTA (claim), "
+                             "conferido na CLM3.")
+        if linha.startswith("?"):
+            if linha_existe is False:
+                raise ValueError(f"Se o claim existe, a linha {linha.lstrip('?')} também existe na cotação "
+                                 "(o claim é do item dela). Confira de novo na VA23.")
+            linha_existe = True                  # claim criado => a linha dele existe
+        elif not (execucao.item or linha):
+            raise ValueError("Esta execução não chegou a criar a linha: não há item para um claim. "
+                             "Confira na VA23/CLM3; se nada foi criado, use 'Não foi criado'.")
+    with _lote(storage):              # tudo ou nada: linha, nota e estado juntos
+        for estado in caminho[:-1]:
+            storage.transitar(execucao_id, estado, "resolução manual")
+        if linha.startswith("?") and linha_existe is not None:
+            item = linha.lstrip("?")
+            storage.definir_linha(execucao_id, item if linha_existe else None,
+                                  f"linha {item} {'existe' if linha_existe else 'não existe'} na cotação (usuário)")
+        if criado:
+            storage.registrar_nota(execucao_id, numero)
+            storage.transitar(execucao_id, Estado.CONCLUIDO, f"{detalhe}; nota {numero} conferida no SAP")
+        else:
+            storage.transitar(execucao_id, Estado.FALHA_DEFINITIVA, f"{detalhe}; claim não existe no SAP")
+
+
+# ----------------------------------------------------------------------- cotações
+
+ROTULO_MODO_COTACAO_LISTA = {"SIMULACAO": "simulação", "ENSAIO": "ensaio"}
+
+
+def linha_cotacao(c) -> tuple[str, ...]:
+    """Quando, Cliente, Projeto, Cotação, Linhas, Situação, Tipo."""
+    quando = datetime.fromisoformat(c.criado_em).strftime("%d/%m/%y %H:%M")
+    itens = ", ".join(f"{l['item']} {l['equipamento']}" for l in c.lista_linhas) or \
+        " + ".join(n for n, ok in (("Produto A", c.produto_a), ("Produto B", c.produto_b)) if ok)
+    cliente = c.cliente or ("Cliente Especial" if c.tipo == "Cliente Especial" else "—")
+    situacao = ROTULO_ESTADO.get(c.estado, c.estado.value)
+    if c.modo != "AUTOMATICO":          # simulação/ensaio nunca gravou no SAP: não confundir com a real
+        situacao = f"{situacao} ({ROTULO_MODO_COTACAO_LISTA.get(c.modo, c.modo)})"
+    return (quando, cliente, c.projeto, c.numero or "—", itens, situacao, c.tipo)
+
+
+def filtrar_cotacoes(registros, texto: str):
+    """Filtro da lista: cada palavra digitada tem que aparecer no cliente, projeto, número, país ou tipo."""
+    from pastas import nome_comparavel
+    palavras = nome_comparavel(texto or "").split()
+    if not palavras:
+        return list(registros)
+    filtrados = []
+    for c in registros:
+        alvo = nome_comparavel(" ".join(filter(None, (c.cliente, c.projeto, c.numero, c.pais, c.regiao, c.tipo))))
+        if all(p in alvo for p in palavras):
+            filtrados.append(c)
+    return filtrados
+
+
+def resolver_cotacao(storage, cotacao_id: str, *, criada: bool, numero: str = "") -> None:
+    """Decisão humana depois de conferir no SAP (VA23) uma cotação sem confirmação."""
+    numero = numero.strip()
+    if criada and (not numero.isdigit() or not numero.isascii()):
+        raise ValueError("Informe o número da cotação (somente dígitos).")
+    registro = storage.obter(cotacao_id)
+    final = Estado.CONCLUIDO if criada else Estado.FALHA_DEFINITIVA
+    caminho = _caminho_de_resolucao(registro.estado, final)     # confere tudo antes de gravar
+    with _lote(storage):
+        for estado in caminho[:-1]:
+            storage.transitar(cotacao_id, estado, "resolução manual")
+        if criada:
+            storage.registrar_numero(cotacao_id, numero, registro.lista_linhas)
+            storage.transitar(cotacao_id, Estado.CONCLUIDO, f"resolvido pelo usuário: cotação {numero} conferida")
+        else:
+            storage.transitar(cotacao_id, Estado.FALHA_DEFINITIVA, "resolvido pelo usuário: cotação não existe")
 
 
 # ----------------------------------------------------------------------- execução
@@ -186,11 +288,18 @@ class Executor:
         self._fabrica = fabrica_sap
         self.fila: "queue.Queue[Evento]" = queue.Queue()
         self._thread: threading.Thread | None = None
+        self._verificacao: threading.Thread | None = None
         self._cancelar: threading.Event | None = None
+        self.janela_mantida: str | None = None   # janela do SAP deixada no menu para o próximo claim
 
     @property
     def ocupado(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        """Execução OU verificação do SAP em andamento: as duas nunca usam o SAP ao mesmo tempo."""
+        return (self._thread is not None and self._thread.is_alive()) or self.verificando
+
+    @property
+    def verificando(self) -> bool:
+        return self._verificacao is not None and self._verificacao.is_alive()
 
     def iniciar(self, req: ClaimRequest, modo: str) -> None:
         if self.ocupado:
@@ -209,7 +318,63 @@ class Executor:
             self._cancelar.set()
 
     def verificar_sap(self) -> None:
-        threading.Thread(target=self._verificar, daemon=True, name="verificar-sap").start()
+        """Diagnóstico da conexão. Nunca junto com uma execução: as duas usariam o SAP ao mesmo tempo."""
+        if self.ocupado:
+            raise RuntimeError("Aguarde a execução em andamento terminar para verificar o SAP.")
+        self._verificacao = threading.Thread(target=self._verificar, daemon=True, name="verificar-sap")
+        self._verificacao.start()
+
+    def iniciar_cotacao(self, req, modo: str, plano_pastas) -> None:
+        """Cotação nova (VA21) em segundo plano. plano_pastas: conferido antes, na tela (pode perguntar)."""
+        if self.ocupado:
+            raise RuntimeError("Já existe uma execução em andamento.")
+        if modo not in modos_cotacao_da_interface(self._cfg):
+            raise ValueError(f"Modo não disponível para cotação: {modo}")
+        self._cancelar = threading.Event()
+        self._thread = threading.Thread(target=self._rodar_cotacao, args=(req, modo, plano_pastas), daemon=True,
+                                        name="cotacao")
+        self._thread.start()
+
+    def _rodar_cotacao(self, req, modo: str, plano_pastas) -> None:
+        from cotacao_service import CotacaoService
+        from storage_cotacao import CotacaoStorage
+        com = _com_inicio()
+        try:
+            sap = self._fabrica(self._cfg, modo)          # o modo real (nunca "ENSAIO" para gravar)
+            if hasattr(sap, "manter_janela"):
+                sap.reaproveitar, sap.manter_janela = self.janela_mantida, True
+                self.janela_mantida = None
+            db = CotacaoStorage(self._db)
+            try:
+                servico = CotacaoService(
+                    self._cfg, sap, db,
+                    progresso=lambda e, s, d: self.fila.put(Evento("etapa", e, s, d, origem="cotacao")),
+                    cancelar=self._cancelar,
+                )
+                resultado = servico.executar_cotacao(req, modo, plano_pastas)
+                self.janela_mantida = getattr(sap, "janela_mantida", None)
+            finally:
+                db.close()
+            self.fila.put(Evento("fim", resultado=resultado, origem="cotacao"))
+        except Exception as erro:  # noqa: BLE001
+            log.exception("Erro inesperado na cotação")
+            self.fila.put(Evento("erro", detalhe=str(erro), origem="cotacao"))
+        finally:
+            _com_fim(com)
+
+    def fechar_janela_mantida(self) -> None:
+        """Ao fechar o programa: fecha a janela da automação que ficou no menu (se ainda estiver lá)."""
+        janela, self.janela_mantida = self.janela_mantida, None
+        if not janela:
+            return
+        com = _com_inicio()
+        try:
+            from sap_client import SapClient
+            SapClient(self._cfg).fechar_por_id(janela)
+        except Exception:  # noqa: BLE001 - fechar o programa nunca pode falhar por isso
+            log.warning("Não foi possível fechar a janela mantida %s", janela)
+        finally:
+            _com_fim(com)
 
     def drenar(self) -> list[Evento]:
         eventos: list[Evento] = []
@@ -229,6 +394,9 @@ class Executor:
         com = _com_inicio()
         try:
             sap = self._fabrica(self._cfg, modo)
+            if hasattr(sap, "manter_janela"):
+                sap.reaproveitar, sap.manter_janela = self.janela_mantida, True
+                self.janela_mantida = None      # só volta a valer se esta execução terminar bem
             db = Storage(self._db)   # conexão própria desta thread
             try:
                 servico = ClaimService(
@@ -237,6 +405,7 @@ class Executor:
                     cancelar=self._cancelar,
                 )
                 resultado = servico.executar(req, modo)
+                self.janela_mantida = getattr(sap, "janela_mantida", None)
             finally:
                 db.close()
             self.fila.put(Evento("fim", resultado=resultado))

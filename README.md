@@ -4,12 +4,12 @@
 
 # Automação de Claims SAP
 
-**Criação automática de claims (reclamações) na transação CLM1 do SAP GUI, do formulário à nota gravada, com anexo, atividades e confirmação.**
+**Criação automática de cotações (VA21), linhas novas em cotação (VA22) e claims (CLM1) no SAP GUI, do formulário ao documento gravado, com pastas de proposta, anexo, atividades e confirmação.**
 
 ![Python](https://img.shields.io/badge/python-3.13%20%7C%203.15-3776AB?logo=python&logoColor=white)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-0078D6?logo=windows&logoColor=white)
 ![SAP GUI Scripting](https://img.shields.io/badge/SAP%20GUI-Scripting-0FAAFF)
-![Testes](https://img.shields.io/badge/testes-168%20passando-2EA44F)
+![Testes](https://img.shields.io/badge/testes-746%20passando-2EA44F)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-todos%20os%20direitos%20reservados-lightgrey)
 
 </div>
@@ -59,6 +59,11 @@ Esta aplicação desktop recebe os dados num formulário, **valida tudo antes de
 | Atualização automática | Publicação num servidor de arquivos; cada computador se atualiza ao abrir |
 | Python embutido | O instalador leva o próprio Python: funciona em máquinas sem Python, sem internet e sem administrador |
 | Claims sem anexo | Opção explícita "Este claim não tem anexo" pula o documento DMS; sem ela, o anexo continua obrigatório |
+| Cotação nova (VA21) | Cria a cotação a partir de tipo, região/país, cliente e projeto; Produto A e Produto B juntos viram uma cotação com duas linhas |
+| Pastas da proposta | Antes de tocar no SAP, confere na rede se o projeto já tem pasta (inclusive em clientes com nome parecido e na rede do outro produto); depois cria a estrutura, copia os modelos e abre o e-mail |
+| Linha nova + claim (VA22) | Um clique cria a linha na cotação e o claim dela; uma segunda linha logo em seguida pede confirmação explícita |
+| Recuperação guiada | Linha gravada sem claim, gravação sem confirmação ou programa fechado no meio: tudo vira pendência com orientação, nunca uma nova gravação automática |
+| Uma janela por computador | Trava de instância única e reserva da ordem/item numa transação só: dois cliques ou duas janelas não geram dois claims |
 
 ## Como funciona
 
@@ -116,7 +121,11 @@ flowchart TB
     CTRL --> SVC[claim_service.py<br/>orquestração e máquina de estados]
     SVC --> VAL[validators.py]
     SVC --> STO[storage.py<br/>histórico SQLite]
+    CTRL --> COT[cotacao_service.py<br/>cotação VA21 + pastas]
+    COT --> PAS[pastas.py<br/>rede de propostas]
+    COT --> STC[storage_cotacao.py]
     SVC --> GW{{sap_gateway.py<br/>contrato}}
+    COT --> GW
     GW --> REAL[sap_client.py<br/>SAP GUI Scripting via pywin32]
     GW --> FAKE[sap_fake.py<br/>SAP simulado para testes]
     CFG[config.py + settings.ini] --> SVC
@@ -137,7 +146,7 @@ Somente `sap_client.py` conhece IDs técnicos de tela. A lógica de negócio fal
 git clone https://github.com/tiagopricilianoo/sap-claim-automation.git
 cd sap-claim-automation
 python -m pip install -r requirements.txt
-python -m pytest -q           # 168 testes, sem precisar de SAP
+python -m pytest -q           # 746 testes, sem precisar de SAP
 python ui.py                  # abre no modo Simulação
 ```
 
@@ -154,7 +163,9 @@ Tudo o que é específico do processo fica em `settings.ini`. Nenhum valor de ne
 | `[execucao]` | Modo de execução e habilitação da gravação |
 | `[avisos_aceitos]` | Janelas do SAP que podem ser confirmadas (com `*` como curinga) |
 | `[atividade.*]` | Cada atividade: texto do item, sub grupo, pasta na árvore e responsável (`@usuario_logado`, fixo ou vazio) |
-| `[rota.*]` | Cada tipo de claim e a sequência das suas atividades |
+| `[rota.*]` | Cada tipo de claim, a sequência das suas atividades e o material/centro da linha nova |
+| `[cotacao]`, `[cotacao.*]` | Dados fixos da VA21 (tipo de documento, organização, canal, escritório) e, por tipo de cotação, setor, emissor, utilização e equipes |
+| `[pastas]` | Raízes de rede das propostas de cada produto |
 
 Exemplo de rota:
 
@@ -214,6 +225,8 @@ oficial não serve, porque não inclui o tkinter.
 - Usuários rodam `instalar.bat` **direto da pasta do servidor**, uma única vez; o atalho é criado na área de trabalho.
 - O programa roda localmente; o histórico de cada usuário fica em `%LOCALAPPDATA%\ClaimAutomation`.
 - A versão anterior fica em `app_anterior`, e cada publicação é registrada em `historico_versoes.txt`.
+- Cada versão leva um `manifesto.json` com o SHA-256 de todos os arquivos. O computador recusa a atualização se faltar, sobrar ou mudar algum arquivo, se a versão for menor que a instalada ou se o `requirements.txt` trouxer opções do pip. O manifesto protege contra cópia corrompida; contra alteração proposital, a pasta do servidor deve ter escrita só para o responsável.
+- Para voltar uma versão, publica-se o código antigo de novo (ele recebe um número maior).
 
 ## Testes
 
@@ -221,15 +234,22 @@ oficial não serve, porque não inclui o tkinter.
 python -m pytest -q
 ```
 
-168 testes cobrem configuração, validação, máquina de estados, histórico, o cliente SAP (com objetos COM simulados que reproduzem o comportamento real da árvore, da grade e das janelas), a orquestração em todos os modos, a interface (controlador) e o ciclo de publicação e atualização. Vários são testes de regressão de problemas encontrados no SAP real, como os códigos de nó que mudam entre sessões.
+746 testes cobrem configuração, validação, máquina de estados, histórico, o cliente SAP (com objetos COM simulados que reproduzem o comportamento real da árvore, da grade, das tabelas de itens e das janelas), a orquestração em todos os modos, cotação e pastas, a interface (controlador) e o ciclo de publicação e atualização. Vários são testes de regressão de problemas encontrados no SAP real, como os códigos de nó que mudam entre sessões.
+
+Os arquivos `tests/test_rev_*.py` e `tests/test_rev2_*.py` vieram de duas rodadas de revisão adversarial (segurança, uso, arquitetura e testes) feitas antes de cada publicação: cada defeito encontrado virou um teste que falhava antes da correção.
 
 ## Estrutura do projeto
 
 ```
 sap-claim-automation/
-├── ui.py                 Interface desktop
+├── ui.py                 Interface desktop (abas de claim, histórico e pendências)
+├── ui_cotacao.py         Abas "Nova cotação" e "Cotações"
+├── tema_ui.py            Tema, trabalho em segundo plano e instância única
 ├── controlador.py        Execução em segundo plano e eventos para a tela
 ├── claim_service.py      Orquestração, modos e regras de estado
+├── cotacao.py            Regras e plano da cotação (VA21)
+├── cotacao_service.py    Orquestração da cotação e das pastas
+├── pastas.py             Pastas da proposta na rede e e-mail
 ├── sap_gateway.py        Contrato com o SAP
 ├── sap_client.py         SAP GUI Scripting (implementação real)
 ├── sap_fake.py           SAP simulado
@@ -238,6 +258,7 @@ sap-claim-automation/
 ├── validators.py         Validações locais
 ├── state.py              Máquina de estados
 ├── storage.py            Histórico SQLite
+├── storage_cotacao.py    Histórico das cotações
 ├── logger_config.py      Logs rotativos sem dados sensíveis
 ├── ensaio.py             Ensaio pelo terminal
 ├── verificar_sap.py      Diagnóstico somente leitura das sessões
@@ -255,7 +276,7 @@ sap-claim-automation/
 - Depende do SAP GUI para Windows e do SAP GUI Scripting habilitado.
 - Os IDs de tela refletem uma configuração específica da CLM1; outras configurações exigem ajustar `sap_client.py` e o `settings.ini`.
 - O histórico local é operacional, de um único usuário; não substitui a auditoria do SAP.
-- A verificação de duplicidade usa o histórico local; claims criados manualmente no SAP não são vistos.
+- A verificação de duplicidade usa o histórico local; claims criados manualmente no SAP ou em outro computador não são vistos pelo programa (o próprio SAP recusa o segundo claim na gravação).
 
 ## Autor e licença
 

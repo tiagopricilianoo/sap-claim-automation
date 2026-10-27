@@ -54,6 +54,71 @@ def ler_origem(config: Path = CONFIG) -> Path | None:
     return Path(valor) if valor else None
 
 
+MANIFESTO = "manifesto.json"
+IGNORADOS = ("__pycache__",)
+# Arquivos que o próprio Windows Explorer cria nas pastas (miniaturas, ícone da pasta): nunca são do
+# programa, nunca são copiados e não fazem uma atualização ser recusada.
+ARQUIVOS_DO_WINDOWS = {"thumbs.db", "desktop.ini", "ehthumbs.db", ".ds_store"}
+
+
+def _do_windows(nome: str) -> bool:
+    return nome.lower() in ARQUIVOS_DO_WINDOWS
+
+
+def requirements_seguro(caminho: Path) -> str:
+    """'' se o requirements.txt só tem 'pacote==versão' (ou faixa); senão, o motivo.
+    Uma linha de opção do pip (--index-url, -e, -r) ou com endereço/caminho executaria código de fora."""
+    import re
+    for linha in caminho.read_text(encoding="utf-8").splitlines():
+        linha = linha.split("#", 1)[0].strip()
+        if not linha:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\s*(?:[=<>!~]=?\s*[0-9][0-9A-Za-z.*]*\s*,?\s*)*", linha):
+            return f"linha não permitida no requirements.txt: {linha[:60]!r}"
+    return ""
+
+
+def _versao_tupla(versao: str) -> tuple[int, ...]:
+    import re
+    if not re.fullmatch(r"\d+(\.\d+)*", (versao or "").strip()):
+        return ()
+    return tuple(int(p) for p in versao.strip().split("."))
+
+
+def conferir_manifesto(pasta: Path, versao: str) -> str:
+    """'' se a cópia bate com o manifesto publicado; senão, o motivo da recusa.
+
+    Protege contra cópia incompleta/corrompida e arquivo estranho na pasta do servidor.
+    NÃO substitui a permissão da pasta: quem pode escrever lá pode trocar o manifesto também.
+    """
+    import hashlib
+    import json
+    try:
+        dados = json.loads((pasta / MANIFESTO).read_text(encoding="utf-8"))
+        esperados: dict[str, str] = dados["arquivos"]
+        if not isinstance(esperados, dict) or not esperados or \
+                not all(isinstance(k, str) and isinstance(v, str) for k, v in esperados.items()):
+            raise TypeError("lista de arquivos inválida")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return "manifesto ausente ou ilegível"
+    if dados.get("versao") != versao:
+        return f"manifesto é da versão {dados.get('versao')!r}, não {versao!r}"
+    raiz = {MANIFESTO, VERSAO}                     # só na raiz do pacote; em subpasta é arquivo estranho
+    presentes = {p.relative_to(pasta).as_posix(): p for p in pasta.rglob("*")
+                 if p.is_file() and p.relative_to(pasta).as_posix() not in raiz and not _do_windows(p.name)
+                 and not any(parte in IGNORADOS for parte in p.relative_to(pasta).parts)}
+    extras = sorted(set(presentes) - set(esperados))
+    if extras:
+        return f"arquivos que não fazem parte da versão: {', '.join(extras[:5])}"
+    for nome, hash_esperado in esperados.items():
+        arquivo = presentes.get(nome)
+        if arquivo is None:
+            return f"arquivo ausente: {nome}"
+        if hashlib.sha256(arquivo.read_bytes()).hexdigest() != hash_esperado:
+            return f"arquivo diferente do publicado: {nome}"
+    return ""
+
+
 def _remover(pasta: Path) -> None:
     if pasta.exists():
         shutil.rmtree(pasta, ignore_errors=True)
@@ -108,14 +173,32 @@ def atualizar(origem: Path | None, local: Path = LOCAL, instalar_libs=instalar_d
     versao_local = ler_versao(app)
     if versao_servidor == versao_local:
         return f"versão {versao_local} já é a do servidor"
+    if not _versao_tupla(versao_servidor):
+        return f"versão do servidor ({versao_servidor!r}) não é um número de versão: ignorada"
+    if _versao_tupla(versao_local) and _versao_tupla(versao_servidor) < _versao_tupla(versao_local):
+        return f"versão do servidor ({versao_servidor}) é mais antiga que a instalada ({versao_local}): ignorada"
 
     _remover(novo)
-    shutil.copytree(origem, novo, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(origem, novo, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "[Tt]humbs.db",
+                                                               "[Dd]esktop.ini", "ehthumbs.db", ".DS_Store"))
     if ler_versao(novo) != versao_servidor:
         _remover(novo)
         return "cópia incompleta (versão mudou durante a cópia): tenta na próxima abertura"
+    exige_manifesto = (app / MANIFESTO).exists()          # a partir da 1ª versão com manifesto, sempre
+    if (novo / MANIFESTO).exists() or exige_manifesto:
+        motivo = conferir_manifesto(novo, versao_servidor)
+        if motivo:
+            _remover(novo)
+            log.warning("Atualização %s recusada: %s", versao_servidor, motivo)
+            return f"atualização {versao_servidor} recusada ({motivo}): usando a versão instalada"
 
     req_novo, req_atual = novo / "requirements.txt", app / "requirements.txt"
+    if req_novo.exists():
+        motivo = requirements_seguro(req_novo)
+        if motivo:
+            _remover(novo)
+            log.warning("Atualização %s recusada: %s", versao_servidor, motivo)
+            return f"atualização {versao_servidor} recusada ({motivo}): usando a versão instalada"
     if req_novo.exists() and (not req_atual.exists() or not filecmp.cmp(req_novo, req_atual, shallow=False)):
         try:
             instalar_libs(req_novo)

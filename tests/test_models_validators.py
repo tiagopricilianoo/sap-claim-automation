@@ -27,10 +27,13 @@ def test_quebras_de_linha_padronizadas():
     assert req.arquivo is None
 
 
-def test_nao_completa_zeros(request_valido):
+def test_tira_zeros_a_esquerda(request_valido):
+    # Revisão de 27/10/2026: no SAP '010' e '10' são o mesmo item; com zeros a duplicidade não via o claim.
     req = ClaimRequest.from_form(tipo="PRODUTO_A", descricao="x", texto_livre="x",
                                  ordem="00123", item="010", arquivo="")
-    assert (req.ordem, req.item) == ("00123", "010")
+    assert (req.ordem, req.item) == ("123", "10")
+    assert ClaimRequest.from_form(tipo="T", descricao="x", texto_livre="x", ordem="1O", item="000",
+                                  arquivo="").ordem == "1O"           # inválido fica como está (validação recusa)
 
 
 # ------------------------------------------------------------ validação
@@ -83,10 +86,13 @@ def test_arquivo_vazio(request_valido, settings, tmp_path):
 
 
 def test_nome_do_arquivo_longo(request_valido, settings, tmp_path):
+    # O limite vem do settings.ini; aqui é fixado em 40 para o teste não depender do valor escolhido.
+    from dataclasses import replace
+    cfg = replace(settings, limites=replace(settings.limites, descricao_documento_max=40))
     longo = tmp_path / ("n" * 37 + ".pdf")     # 41 caracteres
     longo.write_bytes(b"x")
     req = ClaimRequest.from_form(**{**_form(request_valido), "arquivo": str(longo)})
-    problemas = validate(req, settings)
+    problemas = validate(req, cfg)
     assert campos(problemas) == {"arquivo"} and "Renomeie" in problemas[0].mensagem
 
 

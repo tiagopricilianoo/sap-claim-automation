@@ -44,6 +44,8 @@ class RouteConfig:
     chave: str
     rotulo: str
     atividades: tuple[ActivityConfig, ...]
+    material: str = ""     # material da linha nova na cotação (VA22); "" = rota sem linha nova
+    centro: str = ""       # centro da linha nova (sempre digitado, nunca deixado para o SAP)
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,38 @@ class Limits:
     descricao_documento_max: int
     ordem_max: int
     item_max: int
+
+
+@dataclass(frozen=True)
+class TipoCotacao:
+    """Parâmetros da VA21 por tipo de cotação (Nacional, Exportação, Cliente Especial)."""
+    nome: str
+    setor: str
+    emissor: str                 # cliente genérico (ex.: CLIENTE X)
+    utilizacao: str              # tipo de utilização no cabeçalho
+    equipe_produto_a: str
+    equipe_produto_b: str
+    codigo_postal: str = ""      # só exportação
+    nome_cliente_fixo: str = ""  # Cliente Especial: nome fixo no endereço
+    pede_regiao: bool = True
+    pede_pais: bool = False
+    pede_cliente: bool = True
+
+
+@dataclass(frozen=True)
+class CotacaoConfig:
+    tipo_documento: str
+    organizacao: str
+    canal: str
+    escritorio: str
+    titulo_endereco: str
+    hora_recebimento: str
+    validade_meses: int
+    raiz_produto_a: str            # pasta de rede das propostas de Produto A
+    raiz_produto_b: str            # pasta de rede das propostas de Produto B
+    tipos: dict[str, TipoCotacao] = field(default_factory=dict)
+    rota_produto_a: str = "PRODUTO_A"     # material e centro da linha vêm destas rotas
+    rota_produto_b: str = "PRODUTO_B"
 
 
 @dataclass(frozen=True)
@@ -73,6 +107,8 @@ class Settings:
     rotas: dict[str, RouteConfig] = field(default_factory=dict)
     pasta_dados: Path = Path(".")
     aplicacoes: dict[str, str] = field(default_factory=dict)   # ".zip" -> "ZIP"
+    linha_quantidade: str = "1"      # quantidade da linha nova na cotação
+    cotacao: CotacaoConfig | None = None   # criação de cotação (VA21); None = aba desligada
 
     def aplicacao_para(self, arquivo: Path | None) -> str:
         """Código da aplicação a escolher se o SAP perguntar; "" = tipo não configurado."""
@@ -161,10 +197,19 @@ def _carregar_rotas(
             raise ConfigError(f"[{secao}] referencia atividades inexistentes: {', '.join(faltando)}")
         if len(set(nomes)) != len(nomes):
             raise ConfigError(f"[{secao}] repete a mesma atividade")
+        material = _opcional(parser, secao, "material")
+        centro = _opcional(parser, secao, "centro")
+        if bool(material) != bool(centro):
+            raise ConfigError(f"[{secao}] material e centro da linha nova vão juntos: preencha os dois ou nenhum")
+        for nome, valor in (("material", material), ("centro", centro)):
+            if valor and not (valor.isdigit() and valor.isascii()):
+                raise ConfigError(f"[{secao}] {nome} deve ter só dígitos: {valor!r}")
         rotas[chave] = RouteConfig(
             chave=chave,
             rotulo=_obrigatorio(parser, secao, "rotulo"),
             atividades=tuple(atividades[n] for n in nomes),
+            material=material,
+            centro=centro,
         )
     if not rotas:
         raise ConfigError("Nenhuma rota [rota.*] definida no settings.ini")
@@ -186,6 +231,48 @@ def _carregar_aplicacoes(parser: configparser.ConfigParser) -> dict[str, str]:
     return tabela
 
 
+def _carregar_cotacao(parser: configparser.ConfigParser, rotas: dict[str, RouteConfig]) -> CotacaoConfig | None:
+    if not parser.has_section("cotacao"):
+        return None
+    tipos: dict[str, TipoCotacao] = {}
+    for secao in parser.sections():
+        if not secao.startswith("cotacao."):
+            continue
+        nome = secao.split(".", 1)[1].strip()
+        tipos[nome] = TipoCotacao(
+            nome=nome,
+            setor=_obrigatorio(parser, secao, "setor"),
+            emissor=_obrigatorio(parser, secao, "emissor"),
+            utilizacao=_obrigatorio(parser, secao, "utilizacao"),
+            equipe_produto_a=_obrigatorio(parser, secao, "equipe_produto_a"),
+            equipe_produto_b=_obrigatorio(parser, secao, "equipe_produto_b"),
+            codigo_postal=_opcional(parser, secao, "codigo_postal"),
+            nome_cliente_fixo=_opcional(parser, secao, "nome_cliente_fixo"),
+            pede_regiao=_sim_nao(parser, secao, "pede_regiao") if parser.has_option(secao, "pede_regiao") else True,
+            pede_pais=_sim_nao(parser, secao, "pede_pais"),
+            pede_cliente=_sim_nao(parser, secao, "pede_cliente") if parser.has_option(secao, "pede_cliente") else True,
+        )
+    if not tipos:
+        raise ConfigError("[cotacao] sem tipos: crie [cotacao.Nacional], [cotacao.Exportação]...")
+    cfg = CotacaoConfig(
+        tipo_documento=_obrigatorio(parser, "cotacao", "tipo_documento"),
+        organizacao=_obrigatorio(parser, "cotacao", "organizacao"),
+        canal=_obrigatorio(parser, "cotacao", "canal"),
+        escritorio=_obrigatorio(parser, "cotacao", "escritorio"),
+        titulo_endereco=_obrigatorio(parser, "cotacao", "titulo_endereco"),
+        hora_recebimento=_obrigatorio(parser, "cotacao", "hora_recebimento"),
+        validade_meses=_inteiro(parser, "cotacao", "validade_meses"),
+        raiz_produto_a=_obrigatorio(parser, "pastas", "raiz_produto_a"),
+        raiz_produto_b=_obrigatorio(parser, "pastas", "raiz_produto_b"),
+        tipos=tipos,
+    )
+    for chave in (cfg.rota_produto_a, cfg.rota_produto_b):
+        rota = rotas.get(chave)
+        if rota is None or not rota.material:
+            raise ConfigError(f"A cotação usa material e centro de [rota.{chave}], que não os tem.")
+    return cfg
+
+
 def load_settings(caminho: Path | str = CAMINHO_PADRAO) -> Settings:
     caminho = Path(caminho)
     parser = configparser.ConfigParser(interpolation=None)
@@ -205,6 +292,7 @@ def load_settings(caminho: Path | str = CAMINHO_PADRAO) -> Settings:
     ) if parser.has_section("avisos_aceitos") else ()
 
     atividades = _carregar_atividades(parser)
+    rotas = _carregar_rotas(parser, atividades)
 
     return Settings(
         sistema=_obrigatorio(parser, "sap", "sistema").upper(),
@@ -226,9 +314,12 @@ def load_settings(caminho: Path | str = CAMINHO_PADRAO) -> Settings:
             item_max=_inteiro(parser, "limites", "item_max"),
         ),
         avisos_aceitos=avisos,
-        rotas=_carregar_rotas(parser, atividades),
+        rotas=rotas,
         pasta_dados=Path(pasta) if pasta else _pasta_dados_padrao(),
         aplicacoes=_carregar_aplicacoes(parser),
+        linha_quantidade=str(_inteiro(parser, "linha_cotacao", "quantidade"))
+        if parser.has_section("linha_cotacao") else "1",
+        cotacao=_carregar_cotacao(parser, rotas),
     )
 
 

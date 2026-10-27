@@ -40,6 +40,17 @@ class _Elemento:
         self._dono, self._id = dono, id_
         self.text, self.key, self.prensado = "", "", 0
 
+    # janela principal: minimizar / restaurar (a automação reconhece a janela que ela mesma minimizou)
+    def iconify(self):
+        self._dono.minimizada = True
+
+    def maximize(self):
+        self._dono.minimizada = False
+
+    @property
+    def Iconic(self):
+        return getattr(self._dono, "minimizada", False)
+
     def sendVKey(self, tecla):
         self._dono.vkeys.append(tecla)
         gancho = self._dono.ao_vkey.get(tecla)
@@ -79,8 +90,8 @@ class _Elemento:
 # Árvore como no SAP real (prints de 20 e 21/10/2026): pastas com chave fixa,
 # itens com chave SEQUENCIAL (muda quando a árvore muda).
 PASTAS = {
-    "10COMERCIAL": ("GRP-COM", ["PRODUTO A", "PRODUTO B", "SV TU", "SV TR", "SEG.CONTROLE"]),
-    "20ENGENHARIA": ("GRP-ENG", ["PRODUTO A", "PRODUTO B", "ESTUDO 1", "ESTUDO 2",
+    "10COMERCIAL": ("GRP-COM", ["PRODUTO_A", "PRODUTO_B", "SV TU", "SV TR", "SEG.CONTROLE"]),
+    "20ENGENHARIA": ("GRP-ENG", ["PRODUTO_A", "PRODUTO_B", "ESTUDO 1", "ESTUDO 2",
                                    "ITEM AUXILIAR 1", "ITEM AUXILIAR 2", "ANALISE TECNICA"]),
     "30INDUSTRIAL": ("GRP-IND", ["SV TU", "SV TR", "TU", "TR"]),
     "40SUPRIMENTOS": ("GRP-SUP", ["SV TU", "SV TR", "TU", "TR"]),
@@ -424,7 +435,7 @@ def _rota(settings, chave, usuario="USUARIO1"):
 def test_produto_b_custo_responsaveis_nas_linhas_certas(settings):
     cliente, janela = _pronto(settings)
     linhas = cliente.selecionar_atividades(_rota(settings, "PRODUTO_B_CUSTO"), "ROOT")
-    assert [l["DS_ATIVIDADE"] for l in linhas] == ["ANALISE TECNICA", "TR", "TR", "TR", "PRODUTO B"]
+    assert [l["DS_ATIVIDADE"] for l in linhas] == ["ANALISE TECNICA", "TR", "TR", "TR", "PRODUTO_B"]
     assert [l["SUB_GRUPO"] for l in linhas] == ["GRP-ENG", "GRP-IND", "GRP-SUP", "GRP-CUS", "GRP-COM"]
     assert [l["RESP"] for l in linhas] == ["GRUPO-ENG", "USUARIO_IND", "USUARIO_SUP", "USUARIO_CUS", "USUARIO1"]
     assert janela.arvore.expandidos[0] == "ROOT"
@@ -449,7 +460,7 @@ def test_transferir_que_nao_fecha_a_janela_e_erro(settings):
 def test_produto_a(settings):
     cliente, _ = _pronto(settings)
     linhas = cliente.selecionar_atividades(_rota(settings, "PRODUTO_A"), "ROOT")
-    assert [(l["DS_ATIVIDADE"], l["RESP"]) for l in linhas] == [("ANALISE TECNICA", "GRUPO-ENG"), ("PRODUTO A", "USUARIO1")]
+    assert [(l["DS_ATIVIDADE"], l["RESP"]) for l in linhas] == [("ANALISE TECNICA", "GRUPO-ENG"), ("PRODUTO_A", "USUARIO1")]
 
 
 def test_clique_que_nao_gera_linha_para_tudo(settings):
@@ -485,7 +496,7 @@ def test_codigos_dos_itens_mudaram_e_mesmo_assim_acerta(settings, deslocamento):
     linhas = cliente.selecionar_atividades(_rota(settings, "PRODUTO_B_CUSTO"), "ROOT")
     assert [(l["DS_ATIVIDADE"], l["SUB_GRUPO"], l["RESP"]) for l in linhas] == [
         ("ANALISE TECNICA", "GRP-ENG", "GRUPO-ENG"), ("TR", "GRP-IND", "USUARIO_IND"),
-        ("TR", "GRP-SUP", "USUARIO_SUP"), ("TR", "GRP-CUS", "USUARIO_CUS"), ("PRODUTO B", "GRP-COM", "USUARIO1")]
+        ("TR", "GRP-SUP", "USUARIO_SUP"), ("TR", "GRP-CUS", "USUARIO_CUS"), ("PRODUTO_B", "GRP-COM", "USUARIO1")]
 
 
 def test_nao_usa_o_codigo_do_settings(settings):
@@ -494,7 +505,7 @@ def test_nao_usa_o_codigo_do_settings(settings):
     cliente, janela = _pronto(settings)
     rota = [replace(a, no="000000000001") for a in _rota(settings, "PRODUTO_A")]
     linhas = cliente.selecionar_atividades(rota, "ROOT")
-    assert [l["DS_ATIVIDADE"] for l in linhas] == ["ANALISE TECNICA", "PRODUTO A"]
+    assert [l["DS_ATIVIDADE"] for l in linhas] == ["ANALISE TECNICA", "PRODUTO_A"]
 
 
 def test_item_inexistente_na_pasta_para_antes_de_clicar(settings):

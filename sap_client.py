@@ -25,6 +25,7 @@ from typing import Any, Callable
 from config import Settings
 from sap_gateway import (
     AtividadeSelecionada,
+    LinhaPreenchida,
     ElementoNaoEncontrado,
     Popup,
     PopupInesperado,
@@ -61,6 +62,7 @@ GRADE = "wnd[1]/usr/cntlCONTAINER2/shellcont/shell"
 COLUNA_RESPONSAVEL = "RESP"
 COLUNA_DESCRICAO = "DS_ATIVIDADE"
 COLUNA_SUBGRUPO = "SUB_GRUPO"
+COLUNAS_GRADE = ("GRUPO", COLUNA_SUBGRUPO, COLUNA_DESCRICAO, COLUNA_RESPONSAVEL)
 TRANSFERIR = "wnd[1]/tbar[0]/btn[44]"
 # Bandeira verde "Pôr em processamento" (Script4, 21/10/2026). btn[14] é só a POSIÇÃO
 # na barra: antes de clicar, a dica do botão precisa mencionar "processamento".
@@ -87,6 +89,59 @@ LISTA_POPUP = "wnd[1]/usr"
 TECLA_GRAVAR = 11
 TECLA_ESCOLHER = 2
 
+# Cotação: linha nova na VA22 (script "VA21.vbs" e prints de 22/10/2026; tabela e centro
+# vêm também do programa de criação de cotação, já usado em produção).
+COTACAO_NUMERO = "wnd[0]/usr/ctxtVBAK-VBELN"
+_VISAO = "wnd[0]/usr/tabsTAXI_TABSTRIP_OVERVIEW"
+ABA_ITENS = _VISAO + "/tabpT\\02"
+TABELA_ITENS = (ABA_ITENS + "/ssubSUBSCREEN_BODY:SAPMV45A:4411/subSUBSCREEN_TC:SAPMV45A:4912"
+                "/tblSAPMV45ATCTRL_U_ERF_ANGEBOT")
+ABA_ITENS_2 = _VISAO + "/tabpT\\01"      # onde o programa de cotação digita o centro, se não estiver na outra
+TABELA_ITENS_2 = (ABA_ITENS_2 + "/ssubSUBSCREEN_BODY:SAPMV45A:4400/subSUBSCREEN_TC:SAPMV45A:4900"
+                  "/tblSAPMV45ATCTRL_U_ERF_AUFTRAG")
+COL_ITEM, COL_MATERIAL, COL_QUANTIDADE, COL_CENTRO = "VBAP-POSNR", "RV45A-MABNR", "RV45A-KWMENG", "VBAP-WERKS"
+BOTAO_GRAVAR = "wnd[0]/tbar[0]/btn[11]"
+GRAVAR_INCOMPLETO = "wnd[1]/usr/btnSPOP-VAROPTION1"     # botão "Gravar"
+TITULO_INCOMPLETO = "GRAVAR DOCUMENTO INCOMPLETO"
+MAX_PAGINAS_TABELA = 50
+MAX_JANELAS_AO_GRAVAR = 4    # avisos + "Gravar documento incompleto"
+# Cotação nova (VA21): IDs do programa "Criar Cotação" (em produção até out/2026)
+VA21_TIPO = "wnd[0]/usr/ctxtVBAK-AUART"
+VA21_ORGANIZDCAO = "wnd[0]/usr/ctxtVBAK-VKORG"
+VA21_CANAL = "wnd[0]/usr/ctxtVBAK-VTa empresa"
+VA21_SETOR = "wnd[0]/usr/ctxtVBAK-SPART"
+VA21_ESCRITORIO = "wnd[0]/usr/ctxtVBAK-VKBUR"
+VA21_EQUIPE = "wnd[0]/usr/ctxtVBAK-VKGRP"
+_CAB_VENDAS = "wnd[0]/usr/subSUBSCREEN_HEADER:SAPMV45A:4021"
+VA21_EMISSOR = _CAB_VENDAS + "/subPART-SUB:SAPMV45A:4701/ctxtKUAGV-KUNNR"
+VA21_REFERENCIA = _CAB_VENDAS + "/txtVBKD-BSTKD"
+VA21_BOTAO_CABECALHO = _CAB_VENDAS + "/btnBT_HEAD"
+_END = "wnd[1]/usr/subGCS_ADDRESS:SAPLSZA1:0300/subCOUNTRY_SCREEN:SAPLSZA1:0301"
+END_TITULO = _END + "/cmbSZA1_D0100-TITLE_MEDI"
+END_NOME = _END + "/txtADDR1_DATA-NAME1"
+END_CIDADE = _END + "/txtADDR1_DATA-CITY1"
+END_CEP = _END + "/txtADDR1_DATA-POST_CODE1"
+END_OK = "wnd[1]/tbar[0]/btn[0]"
+VA21_VALIDADE = ABA_ITENS + "/ssubSUBSCREEN_BODY:SAPMV45A:4411/ctxtVBAK-BNDDT"
+_CAB = "wnd[0]/usr/tabsTAXI_TABSTRIP_HEAD"
+VA21_UTILIZDCAO = _CAB + "/tabpT\\01/ssubSUBSCREEN_BODY:SAPMV45A:4301/cmbVBAK-ABRVW"
+VA21_ABA_ADICIONAIS = _CAB + "/tabpT\\12"
+_ADIC = (VA21_ABA_ADICIONAIS + "/ssubSUBSCREEN_BODY:SAPMV45A:4312/sub8309:SAPMV45A:8309"
+         "/subSUB_8309:SAPMV45A:9989/tblSAPMV45ATC_9989")
+VA21_DATA_RECEBIMENTO = _ADIC + "/txtWA_ZTBSD_005-DT_RECEB_PEDIDO[6,0]"
+VA21_HORA_RECEBIMENTO = _ADIC + "/txtWA_ZTBSD_005-HR_RECEB_PEDIDO[7,0]"
+MAX_COLUNAS_PROCURA = 25
+# Prefixo de cada campo como apareceu na gravação (txt = texto, ctxt = texto com ajuda F4)
+CAMPOS_GRAVADOS = {COL_ITEM: "txt", COL_MATERIAL: "ctxt", COL_QUANTIDADE: "txt", COL_CENTRO: "ctxt"}
+# Posição em que cada campo apareceu (script de 22/10 e programa de cotação: centro na coluna 7).
+# Só um palpite para ganhar tempo: se não bater, as colunas são mapeadas pelo nome.
+POSICOES_GRAVADAS = {COL_ITEM: (0,), COL_MATERIAL: (1,), COL_QUANTIDADE: (2,),
+                     COL_CENTRO: (8, 7)}     # 8 = aba Venda do USUARIO1 (log de 26/10); 7 = programa de cotação
+# Último trecho do ID de uma célula de tabela: prefixo do tipo + campo + [coluna,linha]
+_ID_CELULA = re.compile(r"^(txt|ctxt|chk|cmb|lbl|btn|rad|pwd)?([A-Za-z0-9_\-]+)\[(\d+),(\d+)\]$")
+
+INTERVALO_ESPERA = 0.03      # s entre consultas enquanto o SAP responde (era 0.1)
+
 TRANSACOES_MENU = frozenset({"SESSION_MANAGER", "SMEN", "S000"})
 MAX_JANELAS_PADRAO = 6
 
@@ -95,6 +150,12 @@ def _numero_documento(texto: str) -> str:
     """'Documento ZDC 20000263669 000 00 criado' -> '20000263669'."""
     achado = re.search(r"Documento\s+\S+\s+(\d+)", texto or "")
     return achado.group(1) if achado else ""
+
+
+def _id_relativo(id_completo: str) -> str:
+    """'/app/con[0]/ses[2]/wnd[0]/usr/...' -> 'wnd[0]/usr/...' (formato usado no findById)."""
+    posicao = id_completo.find("wnd[")
+    return id_completo[posicao:] if posicao >= 0 else id_completo
 
 
 def _itens(colecao: Any) -> list[Any]:
@@ -140,6 +201,7 @@ class SessaoEncontrada:
     conexao: int
     sessao: int
     info: SessionInfo
+    id: str = ""
 
     @property
     def rotulo(self) -> str:
@@ -165,7 +227,8 @@ def listar_sessoes(engine: Any) -> list[SessaoEncontrada]:
         conexao = engine.Children(c)
         for s in range(conexao.Children.Count):
             try:
-                encontradas.append(SessaoEncontrada(c, s, _ler_info(conexao.Children(s))))
+                sessao_com = conexao.Children(s)
+                encontradas.append(SessaoEncontrada(c, s, _ler_info(sessao_com), str(getattr(sessao_com, "Id", ""))))
             except Exception as erro:  # noqa: BLE001 - COM pode falhar de formas variadas
                 log.warning("Sessão %s/%s ignorada: não foi possível ler (%s)", c, s, erro)
     return encontradas
@@ -229,6 +292,13 @@ class SapClient:
         self._dormir = dormir
         self._conexao: Any = None
         self._s: Any = None          # a janela da automação
+        self._colunas_cache: dict[str, dict[str, tuple[int, str]]] = {}
+        # Reaproveitamento da janela da automação entre claims (economiza a abertura, ~2-3 s):
+        self.reaproveitar: str | None = None    # Id da janela deixada pela execução anterior
+        self.manter_janela = False              # no sucesso, deixar a janela no menu (minimizada)
+        self.janela_mantida: str | None = None  # Id da janela mantida (para a próxima execução)
+        self._campos_cache: dict[tuple[str, str], tuple[int, str]] = {}
+        self._aba_atual = ""
         self.base: SessaoEncontrada | None = None
         self.todas: list[SessaoEncontrada] = []
 
@@ -247,6 +317,16 @@ class SapClient:
         engine = self._engine_factory()
         self.todas = listar_sessoes(engine)
         self.base = escolher_base(self.todas, self._settings)
+        reaproveitada = self._janela_reaproveitavel()
+        if reaproveitada is not None:
+            self._conexao = engine.Children(reaproveitada.conexao)
+            self._s = self._conexao.Children(reaproveitada.sessao)
+            try:
+                self._s.findById("wnd[0]").maximize()
+            except Exception:  # noqa: BLE001 - só aparência
+                pass
+            log.info("Janela da automação reaproveitada: %s", reaproveitada.id)
+            return reaproveitada.info
         conexao = engine.Children(self.base.conexao)
 
         abertas = conexao.Children.Count
@@ -273,12 +353,558 @@ class SapClient:
                  nova.Id, info.sistema, info.mandante, info.usuario)
         return info
 
+    def _janela_reaproveitavel(self) -> SessaoEncontrada | None:
+        """A janela deixada pela execução anterior, SÓ se ainda estiver parada no menu principal.
+
+        Se o usuário mexeu nela (está em alguma transação), nunca é usada: abre-se outra.
+        """
+        if not self.reaproveitar or self.base is None:
+            return None
+        for s in self.todas:
+            if s.id != self.reaproveitar:
+                continue
+            mesma_conta = ((s.info.sistema, s.info.mandante, s.info.usuario)
+                           == (self._settings.sistema, self._settings.mandante, self.base.info.usuario))
+            if (mesma_conta and not s.info.ocupada and s.info.transacao in TRANSACOES_MENU
+                    and self._e_a_janela_mantida(s)):
+                return s
+            log.info("Janela anterior %s não reaproveitada (transação %s)", s.id, s.info.transacao)
+        return None
+
+    def _e_a_janela_mantida(self, s: SessaoEncontrada) -> bool:
+        """A janela com aquele Id ainda é a NOSSA? O SAP reaproveita o número ses[n] quando o usuário
+        fecha uma janela e abre outra. A nossa ficou minimizada e sem janela modal; uma do usuário
+        aberta depois não está minimizada. Na dúvida (propriedade ilegível), não é."""
+        try:
+            sessao_com = self._engine_factory().Children(s.conexao).Children(s.sessao)
+            if int(sessao_com.Children.Count) > 1:
+                return False
+            return bool(getattr(sessao_com.findById("wnd[0]"), "Iconic"))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def fechar_por_id(self, janela_id: str) -> bool:
+        """Fecha a janela mantida da automação, se ela ainda estiver parada no menu (ao fechar o programa)."""
+        engine = self._engine_factory()
+        for s in listar_sessoes(engine):
+            if (s.id == janela_id and s.info.transacao in TRANSACOES_MENU and not s.info.ocupada
+                    and self._e_a_janela_mantida(s)):
+                engine.Children(s.conexao).CloseSession(janela_id)
+                log.info("Janela mantida da automação fechada: %s", janela_id)
+                return True
+        return False
+
     def fechar_janela(self) -> None:
         """Fecha a janela da automação (nunca as do usuário)."""
         if self._conexao is not None and self._s is not None:
             self._conexao.CloseSession(self._s.Id)
             log.info("Janela da automação fechada")
         self._s = None
+
+    # ------------------------------------------------------------- cotação: linha nova (VA22)
+
+    def abrir_cotacao(self, cotacao: str) -> None:
+        self._exigir_janela()
+        self._colunas_cache.clear()
+        self._campos_cache.clear()
+        self._aba_atual = ""
+        self._el(OKCODE, "abrir VA22").text = "/nVA22"
+        self._vkey(0)
+        self._falhar_se_erro("abrir VA22")
+        self._el(COTACAO_NUMERO, "número da cotação").text = cotacao
+        self._vkey(0)
+        msg = self.status()                        # ex.: cotação inexistente ou bloqueada por outro usuário
+        if msg.e_erro:
+            dica = (" Feche as janelas do SAP que estão com esta cotação aberta (inclusive janelas antigas "
+                    "da automação, saindo SEM gravar) e tente de novo.") if "processamento" in msg.texto.lower() else ""
+            raise ValorRejeitado(f"SAP: {msg.texto}.{dica}", etapa="abrir cotação")
+        if self._s.Children.Count > 1:
+            return                                 # o serviço lê a janela de aviso e decide
+        self._abrir_aba(ABA_ITENS)
+        self._el(TABELA_ITENS, "lista de itens da cotação")
+
+    def preencher_linha(self, *, material: str, centro: str, quantidade: str) -> LinhaPreenchida:
+        """Digita a linha no primeiro item livre, com o número seguinte ao maior existente.
+
+        Como no programa de criação de cotação: item, material e quantidade na
+        "Síntese de itens"; o centro na aba "Venda" (a Síntese não tem a coluna).
+        Nada é gravado aqui. No fim, a linha é relida na aba Venda PELO NÚMERO do
+        item (item, material e centro), para o serviço conferir.
+        """
+        self._exigir_janela()
+        etapa = "linha nova da cotação"
+        self._abrir_aba(ABA_ITENS)
+        existentes, livre = self._mapear_itens(TABELA_ITENS)
+        if livre is None:
+            raise ElementoNaoEncontrado("Não há linha livre na lista de itens da cotação.", etapa=etapa)
+        numeros = [int(n) for n in existentes]
+        item = str((max(numeros) // 10 + 1) * 10 if numeros else 10)
+
+        log.info("VA22 Síntese de itens: itens existentes %s; linha livre visível %s; item novo %s",
+                 existentes, livre, item)
+        self._escrever(TABELA_ITENS, COL_ITEM, livre, item, etapa)
+        self._escrever(TABELA_ITENS, COL_MATERIAL, livre, material, etapa)
+        self._escrever(TABELA_ITENS, COL_QUANTIDADE, livre, quantidade, etapa)
+        # Ir direto para a aba Venda: a troca de aba já confirma a linha (economiza um Enter).
+        self._abrir_aba(ABA_ITENS_2)
+        status = self.status()
+        if status.e_erro:
+            raise ValorRejeitado(f"SAP: {status.texto}", etapa=etapa)
+        if self._s.Children.Count > 1:
+            return LinhaPreenchida(item, "", "", status)    # o serviço trata a janela antes de seguir
+        aviso_linha = status if status.tipo == "W" else None
+        if aviso_linha is not None or self._aba_selecionada() not in ("", ABA_ITENS_2):
+            # Aviso na linha segurou a troca de aba: Enter para seguir e clicar na aba de novo.
+            self._vkey(0)
+            status = self.status()
+            if status.e_erro:
+                raise ValorRejeitado(f"SAP: {status.texto}", etapa=etapa)
+            # Um aviso novo depois do Enter não pode sumir: dois avisos diferentes param aqui.
+            aviso_linha = self._um_aviso(aviso_linha, status, etapa) if aviso_linha is not None else (
+                status if status.tipo == "W" else None)
+            self._el(ABA_ITENS_2, "aba Venda").select()
+            self._esperar_livre()
+            self._aba_atual = ABA_ITENS_2
+
+        linha = self._linha_do_item(TABELA_ITENS_2, item, etapa)
+        log.info("VA22 aba Venda: item %s na linha visível %s; colunas %s", item, linha,
+                 {n: self._coluna(TABELA_ITENS_2, n) for n in (COL_ITEM, COL_CENTRO)})
+        self._escrever(TABELA_ITENS_2, COL_CENTRO, linha, centro, etapa)
+        # Aviso do cabeçalho na aba Venda (ex.: "Entrar Condições pagamento"): segundo Enter, a mesma
+        # rotina da VA21. O serviço ainda decide se o aviso é aceito.
+        status = self._enter_com_aviso("centro da linha nova")
+        if self._s.Children.Count > 1:
+            return LinhaPreenchida(item, "", "", status)
+
+        # Releitura na aba Venda: a mesma linha, se o item ainda estiver nela; senão, procura de novo.
+        if self._valor(TABELA_ITENS_2, COL_ITEM, linha).lstrip("0") != item:
+            linha = self._linha_do_item(TABELA_ITENS_2, item, etapa)
+        lidos = {nome: self._valor(TABELA_ITENS_2, nome, linha) for nome in (COL_ITEM, COL_CENTRO)}
+        if self._coluna(TABELA_ITENS_2, COL_MATERIAL) is not None:
+            lidos[COL_MATERIAL] = self._valor(TABELA_ITENS_2, COL_MATERIAL, linha)
+        else:
+            lidos[COL_MATERIAL] = self._ler_item(TABELA_ITENS, ABA_ITENS, item, etapa).get(COL_MATERIAL, "")
+        return LinhaPreenchida(item=lidos[COL_ITEM], material=lidos[COL_MATERIAL],
+                               centro=lidos[COL_CENTRO], status=self._um_aviso(aviso_linha, status, etapa))
+
+    def gravar_cotacao(self, cotacao: str) -> StatusMessage:
+        """Grava a cotação alterada (VA22). Ver _gravar_documento_vendas."""
+        msg = self._gravar_documento_vendas("gravar cotação")
+        log.info("Cotação %s gravada: %s", cotacao, msg.texto)
+        return msg
+
+    def _gravar_documento_vendas(self, etapa: str) -> StatusMessage:
+        """Ctrl+S de cotação (VA21/VA22). Só confirma a janela se ela for "Gravar documento incompleto".
+
+        Como no programa de cotação: se o SAP mostrar um aviso em vez da janela, um Enter
+        segue com a gravação. A partir do clique em gravar, qualquer dúvida vira ResultadoIncerto.
+        """
+        self._exigir_janela()
+        if self._s.Children.Count > 1:
+            raise PopupInesperado("Há uma janela aberta antes de gravar a cotação.", etapa=etapa)
+        botao = self._el(BOTAO_GRAVAR, etapa)
+        titulo_tela = " ".join(str(getattr(self._s.findById("wnd[0]"), "Text", "") or "").split()).upper()
+        self.avisos_gravacao = []          # tudo o que foi confirmado nesta gravação (vai para o histórico)
+        try:
+            botao.press()
+            self._esperar_livre()
+            for _ in range(MAX_JANELAS_AO_GRAVAR):
+                if self._s.Children.Count > 1:
+                    janela = self._s.findById(POPUP)
+                    titulo = " ".join(str(janela.Text).split()).upper()
+                    if titulo == TITULO_INCOMPLETO:
+                        self._s.findById(GRAVAR_INCOMPLETO).press()
+                        self._esperar_livre()
+                        break
+                    if titulo_tela and titulo == titulo_tela:
+                        # Lista de avisos do SAP (ex.: 975 impostos, 8710 lista de preços), com o título
+                        # da própria tela. O programa de cotação seguia com Enter ("confirmar salvar").
+                        conteudo = self._texto_da_janela(janela) or "(conteúdo não legível)"
+                        log.info("Lista de avisos ao gravar ('%s'): Enter para seguir", janela.Text)
+                        self.avisos_gravacao.append(f"lista de avisos '{janela.Text}': {conteudo}")
+                        janela.sendVKey(0)
+                        self._esperar_livre()
+                        continue
+                    raise ResultadoIncerto(f"Janela inesperada ao gravar a cotação: '{janela.Text}'", etapa=etapa)
+                aviso = self.status()
+                if aviso.tipo == "W":
+                    if not self._aviso_aceito(aviso.texto):
+                        # Aviso desconhecido no meio da gravação: não confirma; quem decide é a pessoa.
+                        raise ResultadoIncerto(f"Aviso não previsto ao gravar: '{aviso.texto}'", etapa=etapa)
+                    self.avisos_gravacao.append(f"aviso aceito: {aviso.texto}")
+                    self._vkey(0)                   # aviso da lista de aceitos: Enter segue com a gravação
+                    continue
+                break
+            msg = self.status()
+        except ResultadoIncerto:
+            raise
+        except Exception as erro:  # noqa: BLE001
+            raise ResultadoIncerto(f"Sem resposta após gravar a cotação ({erro})", etapa=etapa) from erro
+        if self._s.Children.Count > 1:
+            raise ResultadoIncerto(f"Janela aberta depois de gravar a cotação (status: '{msg.texto}')", etapa=etapa)
+        return msg
+
+    # ------------------------------------------------------------- cotação nova (VA21)
+
+    def iniciar_cotacao(self, *, tipo_documento: str, organizacao: str, canal: str, setor: str,
+                        escritorio: str, equipe: str) -> None:
+        """VA21 -> dados organizacionais -> Enter. Nada é gravado."""
+        self._exigir_janela()
+        self._colunas_cache.clear()
+        self._campos_cache.clear()
+        self._aba_atual = ""
+        self._el(OKCODE, "abrir VA21").text = "/nVA21"
+        self._vkey(0)
+        self._falhar_se_erro("abrir VA21")
+        for campo, valor, nome in ((VA21_TIPO, tipo_documento, "tipo de cotação"),
+                                   (VA21_ORGANIZDCAO, organizacao, "organização de vendas"),
+                                   (VA21_CANAL, canal, "canal"), (VA21_SETOR, setor, "setor"),
+                                   (VA21_ESCRITORIO, escritorio, "escritório"), (VA21_EQUIPE, equipe, "equipe")):
+            self._el(campo, nome).text = valor
+        self._vkey(0)
+        self._falhar_se_erro("dados iniciais da cotação")
+        try:
+            self._s.findById(VA21_EMISSOR)
+        except Exception as erro:  # noqa: BLE001
+            raise ElementoNaoEncontrado(
+                "O campo do emissor não apareceu: o usuário pode não ter acesso a este tipo de cotação, "
+                "ou a tela do SAP está diferente. Nada foi gravado.", etapa="dados iniciais da cotação") from erro
+
+    def preencher_cliente(self, *, emissor: str, titulo: str, nome: str, cidade: str,
+                          codigo_postal: str) -> Popup | None:
+        """Emissor genérico + janela de endereço. Devolve a janela que sobrar aberta (o serviço decide)."""
+        self._exigir_janela()
+        self._el(VA21_EMISSOR, "emissor").text = emissor
+        self._vkey(0)
+        self._falhar_se_erro("emissor")
+        if self._s.Children.Count < 2:
+            raise ElementoNaoEncontrado("A janela de endereço do cliente não abriu.", etapa="endereço do cliente")
+        self._el(END_TITULO, "título do endereço").key = titulo
+        self._el(END_NOME, "nome do cliente").text = nome
+        self._el(END_CIDADE, "cidade/projeto").text = cidade
+        if codigo_postal:
+            self._el(END_CEP, "código postal").text = codigo_postal
+        self._el(END_OK, "confirmar endereço").press()
+        self._esperar_livre()
+        self._falhar_se_erro("endereço do cliente")
+        return self.popup_aberto()
+
+    def preencher_validade(self, *, validade: str, referencia: str) -> StatusMessage:
+        """Validade (Síntese de itens) + referência do cliente. Devolve o 1º aviso, se houver."""
+        self._exigir_janela()
+        self._vkey(0)                                # "avançar para dados de validade"
+        self._falhar_se_erro("validade da cotação")
+        self._abrir_aba(ABA_ITENS)
+        self._campo_por_sufixo(VA21_VALIDADE, "ctxtVBAK-BNDDT", "validade").text = validade
+        self._vkey(0)
+        primeiro = self.status()
+        if primeiro.e_erro:
+            raise ValorRejeitado(f"SAP: {primeiro.texto}", etapa="validade da cotação")
+        self._vkey(0)                                # o programa de cotação confirma duas vezes
+        segundo = self.status()
+        if segundo.e_erro:
+            raise ValorRejeitado(f"SAP: {segundo.texto}", etapa="validade da cotação")
+        if primeiro.tipo == "W" and segundo.tipo == "W" and segundo.texto != primeiro.texto:
+            raise ValorRejeitado(f"Dois avisos seguidos na validade: '{primeiro.texto}' e '{segundo.texto}'. "
+                                 "Nada foi gravado", etapa="validade da cotação")
+        self._el(VA21_REFERENCIA, "referência cliente/projeto").text = referencia
+        return primeiro if primeiro.tipo == "W" else segundo
+
+    def preencher_linhas_novas(self, linhas: list[tuple[str, str, str]]) -> list[LinhaPreenchida]:
+        """Linhas (material, centro, quantidade) da cotação nova; o SAP numera (10, 20...).
+
+        Material e quantidade na Síntese de itens; centro na aba Venda (como na VA22).
+        Nada é gravado. Cada linha é relida (item, material, centro) para o serviço conferir.
+        """
+        self._exigir_janela()
+        etapa = "linhas da cotação"
+        self._abrir_aba(ABA_ITENS)
+        for r, (material, _, quantidade) in enumerate(linhas):
+            self._escrever(TABELA_ITENS, COL_MATERIAL, r, material, etapa)
+            self._escrever(TABELA_ITENS, COL_QUANTIDADE, r, quantidade, etapa)
+        self._vkey(0)                                # "confirmar item"
+        status = self.status()
+        if status.e_erro:
+            raise ValorRejeitado(f"SAP: {status.texto}", etapa=etapa)
+        if self._s.Children.Count > 1:
+            return [LinhaPreenchida("", "", "", status)]
+        itens = [self._valor(TABELA_ITENS, COL_ITEM, r) for r in range(len(linhas))]
+        if not all(i.isdigit() for i in itens):
+            raise ValorRejeitado(f"O SAP não numerou as linhas como esperado: {itens}. Nada foi gravado.",
+                                 etapa=etapa)
+        aviso = status if status.tipo == "W" else None
+
+        self._abrir_aba(ABA_ITENS_2)
+        for item, (_, centro, _) in zip(itens, linhas):
+            self._escrever(TABELA_ITENS_2, COL_CENTRO, self._linha_do_item(TABELA_ITENS_2, item, etapa), centro, etapa)
+        status = self._enter_com_aviso(etapa)
+        if self._s.Children.Count > 1:
+            return [LinhaPreenchida("", "", "", status)]
+        aviso = self._um_aviso(aviso, status, etapa)
+
+        lidas = []
+        tem_material = self._coluna(TABELA_ITENS_2, COL_MATERIAL) is not None
+        for item in itens:
+            r = self._linha_do_item(TABELA_ITENS_2, item, etapa)
+            material = self._valor(TABELA_ITENS_2, COL_MATERIAL, r) if tem_material else ""
+            lidas.append(LinhaPreenchida(self._valor(TABELA_ITENS_2, COL_ITEM, r), material,
+                                         self._valor(TABELA_ITENS_2, COL_CENTRO, r), aviso))
+        if not tem_material:
+            for i, item in enumerate(itens):
+                material = self._ler_item(TABELA_ITENS, ABA_ITENS, item, etapa).get(COL_MATERIAL, "")
+                lidas[i] = LinhaPreenchida(lidas[i].item, material, lidas[i].centro, lidas[i].status)
+        return lidas
+
+    def preencher_cabecalho(self, *, utilizacao: str, data: str, hora: str) -> StatusMessage:
+        """Cabeçalho: tipo de utilização e data/hora de recebimento do pedido. Nada é gravado."""
+        self._exigir_janela()
+        self._el(VA21_BOTAO_CABECALHO, "abrir cabeçalho").press()
+        self._esperar_livre()
+        self._falhar_se_erro("cabeçalho da cotação")
+        self._el(VA21_UTILIZDCAO, "tipo de utilização").key = utilizacao
+        self._el(VA21_ABA_ADICIONAIS, "aba dados adicionais").select()
+        self._esperar_livre()
+        self._falhar_se_erro("dados adicionais")
+        self._el(VA21_DATA_RECEBIMENTO, "data de recebimento do pedido").text = data
+        self._el(VA21_HORA_RECEBIMENTO, "hora de recebimento do pedido").text = hora
+        return self.status()
+
+    def gravar_cotacao_nova(self) -> StatusMessage:
+        msg = self._gravar_documento_vendas("gravar cotação nova")
+        log.info("Cotação nova gravada: %s", msg.texto)
+        return msg
+
+    def _enter_com_aviso(self, etapa: str) -> StatusMessage:
+        """Enter; se vier aviso (ex.: condições de pagamento), segundo Enter. Devolve o aviso."""
+        self._vkey(0)
+        status = self.status()
+        if status.e_erro:
+            raise ValorRejeitado(f"SAP: {status.texto}", etapa=etapa)
+        if status.tipo == "W" and self._s.Children.Count < 2:
+            log.info("Aviso '%s'; segundo Enter", status.texto)
+            self._vkey(0)
+            segundo = self.status()
+            if segundo.e_erro:
+                raise ValorRejeitado(f"SAP: {segundo.texto}", etapa=etapa)
+            if segundo.tipo == "W" and segundo.texto != status.texto:
+                raise ValorRejeitado(f"Dois avisos seguidos: '{status.texto}' e '{segundo.texto}'. Nada foi gravado.",
+                                     etapa=etapa)
+        return status
+
+    @staticmethod
+    def _um_aviso(primeiro: StatusMessage | None, segundo: StatusMessage, etapa: str) -> StatusMessage:
+        """O serviço confere UM status. Dois avisos W diferentes no mesmo passo: o segundo não pode sumir
+        sem passar pela lista de avisos aceitos, então para aqui (nada foi gravado ainda)."""
+        if primeiro is None or primeiro.tipo != "W":
+            return segundo
+        if segundo.tipo == "W" and " ".join(segundo.texto.split()) != " ".join(primeiro.texto.split()):
+            raise ValorRejeitado(f"Dois avisos seguidos: '{primeiro.texto}' e '{segundo.texto}'. Nada foi gravado.",
+                                 etapa=etapa)
+        return primeiro
+
+    def _aviso_aceito(self, texto: str) -> bool:
+        """Mesmo critério do serviço: [avisos_aceitos] do settings.ini (* = qualquer trecho)."""
+        import fnmatch
+        texto = " ".join((texto or "").split())
+        return any(fnmatch.fnmatchcase(texto, padrao) for padrao in self._settings.avisos_aceitos)
+
+    def _campo_por_sufixo(self, id_tecnico: str, sufixo: str, etapa: str) -> Any:
+        """O campo pelo ID gravado; se a tela mudou, procura pelo final do ID (como o programa de cotação)."""
+        try:
+            return self._s.findById(id_tecnico)
+        except Exception:  # noqa: BLE001
+            pass
+        achado = self._procurar_sufixo(self._s.findById("wnd[0]"), sufixo)
+        if achado is None:
+            raise ElementoNaoEncontrado(f"Campo {sufixo} não encontrado na tela.", etapa=etapa)
+        return achado
+
+    def _procurar_sufixo(self, controle: Any, sufixo: str) -> Any:
+        if str(getattr(controle, "Id", "")).endswith(sufixo):
+            return controle
+        try:
+            filhos = _itens(controle.Children)
+        except Exception:  # noqa: BLE001
+            return None
+        for filho in filhos:
+            achado = self._procurar_sufixo(filho, sufixo)
+            if achado is not None:
+                return achado
+        return None
+
+    # ------------------------------------------------------------- tabela de itens da cotação
+
+    def _abrir_aba(self, aba: str) -> None:
+        if self._aba_atual == aba:
+            return
+        if not self._aba_atual and self._aba_selecionada() == aba:    # a VA22 já abriu nesta aba
+            self._aba_atual = aba
+            return
+        self._el(aba, "aba da lista de itens").select()
+        self._esperar_livre()
+        self._aba_atual = aba
+
+    def _aba_selecionada(self) -> str:
+        """Id da aba ativa da VA22 ("" se não der para saber: nesse caso a aba é clicada)."""
+        try:
+            return _id_relativo(str(self._s.findById(_VISAO).SelectedTab.Id))
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _mapa_colunas(self, tabela_id: str) -> dict[str, tuple[int, str]]:
+        """Colunas da tabela PELO NOME do campo: nome -> (índice, prefixo do ID).
+
+        A posição muda com o layout do usuário, por isso nunca é fixa. Lê os IDs das
+        células visíveis (ex.: .../txtVBAP-POSNR[0,3]); se a tabela não expuser as
+        células, usa GetCell(0, c).Name (prefixo vazio).
+        """
+        if tabela_id in self._colunas_cache:
+            return self._colunas_cache[tabela_id]
+        tabela = self._el(tabela_id, "lista de itens")
+        mapa: dict[str, tuple[int, str]] = {}
+        try:
+            for celula in _itens(tabela.Children):
+                ultimo = str(getattr(celula, "Id", "") or "").rsplit("/", 1)[-1]
+                achado = _ID_CELULA.match(ultimo)
+                if achado:
+                    prefixo, nome, coluna = achado.group(1), achado.group(2).upper(), int(achado.group(3))
+                    mapa.setdefault(nome, (coluna, prefixo + achado.group(2)))
+        except Exception as erro:  # noqa: BLE001
+            log.info("Células da tabela %s não enumeráveis (%s); usando GetCell", tabela_id, erro)
+        if mapa:
+            self._colunas_cache[tabela_id] = mapa
+            return mapa
+        try:
+            total = int(tabela.Columns.Count)
+        except Exception:  # noqa: BLE001
+            total = 0
+        for c in range(total):
+            try:
+                mapa.setdefault(str(tabela.GetCell(0, c).Name).strip().upper(), (c, ""))
+            except Exception:  # noqa: BLE001
+                continue
+        if not mapa:
+            # Último recurso: os IDs exatos da gravação (prefixo + campo), procurando a coluna.
+            for nome, prefixo in CAMPOS_GRAVADOS.items():
+                for c in range(MAX_COLUNAS_PROCURA):
+                    try:
+                        self._s.findById(f"{tabela_id}/{prefixo}{nome}[{c},0]")
+                    except Exception:  # noqa: BLE001
+                        continue
+                    mapa[nome] = (c, prefixo + nome)
+                    break
+        if mapa:
+            self._colunas_cache[tabela_id] = mapa
+        return mapa
+
+    def _campo(self, tabela_id: str, nome: str) -> tuple[int, str] | None:
+        """Coluna de um campo: primeiro a posição da gravação (1 consulta), senão o mapa completo."""
+        chave = (tabela_id, nome)
+        if chave in self._campos_cache:
+            return self._campos_cache[chave]
+        achado = None
+        prefixo = CAMPOS_GRAVADOS.get(nome, "")
+        if prefixo and tabela_id not in self._colunas_cache:
+            for posicao in POSICOES_GRAVADAS.get(nome, ()):
+                try:
+                    self._s.findById(f"{tabela_id}/{prefixo}{nome}[{posicao},0]")
+                except Exception:  # noqa: BLE001 - layout diferente
+                    continue
+                achado = (posicao, prefixo + nome)
+                break
+        if achado is None:
+            achado = self._mapa_colunas(tabela_id).get(nome)
+        if achado is not None:
+            self._campos_cache[chave] = achado
+        return achado
+
+    def _coluna(self, tabela_id: str, nome: str) -> int | None:
+        achado = self._campo(tabela_id, nome)
+        return achado[0] if achado else None
+
+    def _valor(self, tabela_id: str, nome: str, linha: int) -> str:
+        return str(self._celula(tabela_id, nome, linha, "lista de itens").Text or "").strip()
+
+    def _escrever(self, tabela_id: str, nome: str, linha: int, valor: str, etapa: str) -> None:
+        """Escreve numa célula só se ela aceitar edição; senão, erro claro (nada gravado)."""
+        celula = self._celula(tabela_id, nome, linha, etapa)
+        atual = str(getattr(celula, "Text", "") or "").strip()
+        if not bool(getattr(celula, "Changeable", True)):
+            raise ValorRejeitado(
+                f"A célula {nome} da linha visível {linha} não aceita edição (valor atual: '{atual or 'vazio'}'). "
+                "Nada foi gravado.", etapa=etapa)
+        try:
+            celula.text = valor
+        except Exception as erro:  # noqa: BLE001
+            raise ValorRejeitado(
+                f"O SAP recusou '{valor}' em {nome}, linha visível {linha} (valor atual: '{atual or 'vazio'}'; "
+                f"{erro}). Nada foi gravado.", etapa=etapa) from erro
+
+    def _celula(self, tabela_id: str, nome: str, linha: int, etapa: str) -> Any:
+        achado = self._campo(tabela_id, nome)
+        if achado is None:
+            vistas = ", ".join(sorted(self._mapa_colunas(tabela_id))) or "nenhuma"
+            raise ElementoNaoEncontrado(f"Coluna {nome} não encontrada na lista de itens. Colunas vistas: {vistas}.",
+                                        etapa=etapa)
+        coluna, campo = achado
+        try:
+            if campo:
+                return self._s.findById(f"{tabela_id}/{campo}[{coluna},{linha}]")
+            return self._el(tabela_id, etapa).GetCell(linha, coluna)
+        except Exception as erro:  # noqa: BLE001
+            raise ElementoNaoEncontrado(f"Célula {nome} da linha {linha} não encontrada ({erro})",
+                                        etapa=etapa) from erro
+
+    def _paginas(self, tabela_id: str):
+        """Percorre a tabela página a página (rolando), devolvendo (tabela, linha visível, item)."""
+        tabela = self._el(tabela_id, "lista de itens")
+        barra = tabela.VerticalScrollbar
+        if int(barra.Position) != 0:
+            barra.Position = 0
+            self._esperar_livre()
+            tabela = self._el(tabela_id, "lista de itens")
+        for _ in range(MAX_PAGINAS_TABELA):
+            self._celula(tabela_id, COL_ITEM, 0, "lista de itens")    # coluna do item tem que existir
+            visiveis = int(tabela.VisibleRowCount)
+            for r in range(visiveis):
+                try:
+                    valor = str(self._celula(tabela_id, COL_ITEM, r, "lista de itens").Text or "").strip()
+                except ElementoNaoEncontrado:   # linha além do fim da tabela
+                    return
+                yield tabela, r, valor
+            barra = tabela.VerticalScrollbar
+            posicao, maximo = int(barra.Position), int(barra.Maximum)
+            if posicao >= maximo or visiveis < 1:
+                return
+            # Repete a última linha da página (sobreposição); com 1 linha visível, anda de 1 em 1.
+            barra.Position = min(maximo, posicao + max(1, visiveis - 1))
+            self._esperar_livre()
+            tabela = self._el(tabela_id, "lista de itens")
+
+    def _mapear_itens(self, tabela_id: str) -> tuple[list[str], int | None]:
+        """Itens existentes e a primeira linha visível livre (na página em que a busca parou)."""
+        existentes: list[str] = []
+        for _, r, valor in self._paginas(tabela_id):
+            if not valor:
+                return existentes, r
+            if valor.isdigit() and valor not in existentes:
+                existentes.append(valor)
+        return existentes, None
+
+    def _linha_do_item(self, tabela_id: str, item: str, etapa: str) -> int:
+        alvo = item.lstrip("0")
+        for _, r, valor in self._paginas(tabela_id):
+            if valor.lstrip("0") == alvo:
+                return r
+            if not valor:
+                break
+        raise ValorRejeitado(f"O item {item} não aparece na lista de itens da cotação.", etapa=etapa)
+
+    def _ler_item(self, tabela_id: str, aba: str, item: str, etapa: str) -> dict[str, str]:
+        self._abrir_aba(aba)
+        linha = self._linha_do_item(tabela_id, item, etapa)
+        return {nome: self._valor(tabela_id, nome, linha)
+                for nome in (COL_ITEM, COL_MATERIAL) if self._coluna(tabela_id, nome) is not None}
 
     # ------------------------------------------------------------- Fase 1: nota
 
@@ -350,6 +976,8 @@ class SapClient:
         Qualquer divergência para tudo sem transferir.
         """
         self._exigir_janela()
+        if not atividades:      # rota sem atividades no settings.ini: nunca transferir uma grade vazia
+            raise ValorRejeitado("A rota não tem atividades configuradas.", etapa="grade de atividades")
         self._el(ABA_SINTESE, "aba Síntese da nota").select()
         self._esperar_livre()
         barra = self._el(BARRA_ATIVIDADES, "barra de atividades")
@@ -402,10 +1030,10 @@ class SapClient:
         if int(grade.RowCount) != len(atividades):
             raise ValorRejeitado(f"A grade tem {grade.RowCount} linha(s); esperado {len(atividades)}.",
                                  etapa="conferência final das atividades")
+        linhas = self._ler_grade(grade)          # uma leitura só, usada na conferência e no registro
         for posicao, atividade in enumerate(atividades):
-            self._conferir_linha(grade, posicao, atividade, "conferência final das atividades",
-                                 com_responsavel=True)
-        linhas = self._ler_grade(grade)
+            self._conferir_valores(linhas[posicao], posicao, atividade, "conferência final das atividades",
+                                   com_responsavel=True)
 
         grade.selectAll()
         self._el(TRANSFERIR, "Transferir atividades").press()
@@ -588,7 +1216,25 @@ class SapClient:
         raise NotImplementedError("Consulta na CLM3: aguardando a gravação de script com o ID do campo.")
 
     def encerrar(self) -> None:
-        self.fechar_janela()
+        """Fim com sucesso: fecha a janela ou, se pedido, deixa-a no menu, minimizada, para o próximo claim."""
+        if not self.manter_janela or self._s is None:
+            self.fechar_janela()
+            return
+        try:
+            self._el(OKCODE, "voltar ao menu").text = "/n"
+            self._vkey(0)
+            if self._s.Children.Count > 1 or _ler_info(self._s).transacao not in TRANSACOES_MENU:
+                raise RuntimeError("a janela não voltou ao menu")
+            try:
+                self._s.findById("wnd[0]").iconify()
+            except Exception:  # noqa: BLE001 - só aparência
+                pass
+            self.janela_mantida = str(self._s.Id)
+            log.info("Janela da automação mantida no menu para o próximo claim: %s", self.janela_mantida)
+        except Exception as erro:  # noqa: BLE001
+            log.info("Janela não mantida (%s); fechando", erro)
+            self.janela_mantida = None
+            self.fechar_janela()
 
     def sair_sem_gravar(self) -> None:
         raise NotImplementedError("Não usado: a janela da automação é deixada aberta para conferência.")
@@ -618,12 +1264,12 @@ class SapClient:
         self._aguardar(lambda: None if self._s.Busy else True, "resposta do SAP")
 
     def _aguardar(self, condicao: Callable[[], Any], o_que: str) -> Any:
-        passos = max(1, int(self._timeout / 0.1))
+        passos = max(1, int(self._timeout / INTERVALO_ESPERA))
         for _ in range(passos):
             resultado = condicao()
             if resultado is not None:
                 return resultado
-            self._dormir(0.1)
+            self._dormir(INTERVALO_ESPERA)
         raise SessaoIndisponivel(f"Tempo esgotado aguardando {o_que} ({self._timeout:.0f}s).", etapa=o_que)
 
     def _escolher_na_lista(self, texto: str, etapa: str) -> None:
@@ -657,15 +1303,34 @@ class SapClient:
 
     @staticmethod
     def _ler_grade(grade: Any) -> list[dict[str, str]]:
-        ordem = grade.ColumnOrder
-        try:
-            colunas = [str(ordem(i)) for i in range(ordem.Count)]
-        except Exception:  # noqa: BLE001 - algumas versões expõem só iteração
-            colunas = [str(c) for c in ordem]
-        return [
-            {c: str(grade.GetCellValue(linha, c) or "").strip() for c in colunas}
-            for linha in range(int(grade.RowCount))
-        ]
+        """Só as colunas usadas na conferência e no histórico (antes: todas as colunas da grade)."""
+        linhas: list[dict[str, str]] = []
+        for linha in range(int(grade.RowCount)):
+            valores: dict[str, str] = {}
+            for coluna in COLUNAS_GRADE:
+                try:
+                    valores[coluna] = str(grade.GetCellValue(linha, coluna) or "").strip()
+                except Exception:  # noqa: BLE001 - coluna que não existe nesta grade
+                    continue
+            linhas.append(valores)
+        return linhas
+
+    @staticmethod
+    def _conferir_valores(valores: dict[str, str], linha: int, atividade: AtividadeSelecionada, etapa: str,
+                          com_responsavel: bool) -> None:
+        esperados = [(COLUNA_DESCRICAO, atividade.descricao)]
+        if atividade.subgrupo:
+            esperados.append((COLUNA_SUBGRUPO, atividade.subgrupo))
+        if com_responsavel and atividade.responsavel:
+            esperados.append((COLUNA_RESPONSAVEL, atividade.responsavel))
+        for coluna, esperado in esperados:
+            atual = " ".join(valores.get(coluna, "").split()).upper()
+            if atual != " ".join(esperado.split()).upper():
+                raise ValorRejeitado(
+                    f"Linha {linha + 1} da grade: {coluna} = '{atual or 'vazio'}', esperado '{esperado}'. "
+                    "Nada foi transferido.",
+                    etapa=etapa,
+                )
 
     @staticmethod
     def _nova_janela(conexao: Any, ids_antes: set[str]) -> Any:

@@ -39,65 +39,8 @@ from sobre import COPYRIGHT
 from state import Estado
 from storage import Storage
 
-RAIZ = Path(__file__).resolve().parent
-AZUL_PADRAO = "#0E7490"
-
-
-# ============================================================================ tema
-
-def _misturar(cor: str, com: str, fracao: float) -> str:
-    """Mistura duas cores hex (fração da segunda)."""
-    a = [int(cor[i:i + 2], 16) for i in (1, 3, 5)]
-    b = [int(com[i:i + 2], 16) for i in (1, 3, 5)]
-    return "#" + "".join(f"{round(x + (y - x) * fracao):02X}" for x, y in zip(a, b))
-
-
-def _versao_instalada() -> str:
-    try:
-        return "v" + (RAIZ / "versao.txt").read_text(encoding="utf-8").strip()
-    except OSError:
-        return "desenvolvimento"
-
-
-def carregar_tema() -> dict[str, str]:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(RAIZ / "tema.ini", encoding="utf-8")
-    azul = parser.get("marca", "cor_principal", fallback=AZUL_PADRAO).strip() or AZUL_PADRAO
-    return {
-        "azul": azul,
-        "azul_hover": _misturar(azul, "#000000", 0.18),
-        "azul_claro": _misturar(azul, "#FFFFFF", 0.90),
-        "fundo": "#F3F5F8",
-        "cartao": "#FFFFFF",
-        "borda": "#DCE2E9",
-        "texto": "#1E2A38",
-        "suave": "#5B6B7C",
-        "ok": "#1E8E5A",
-        "ok_claro": "#E4F4EC",
-        "erro": "#C62828",
-        "erro_claro": "#FBE9E9",
-        "atencao": "#B26A00",
-        "atencao_claro": "#FFF3E0",
-        "inativo": "#AAB4BF",
-    }
-
-
-T = carregar_tema()
-FONTE = "Segoe UI"
-
-
-def fonte(tamanho: int = 13, peso: str = "normal") -> ctk.CTkFont:
-    return ctk.CTkFont(family=FONTE, size=tamanho, weight=peso)
-
-
-def cartao(master, **kw) -> ctk.CTkFrame:
-    return ctk.CTkFrame(master, fg_color=T["cartao"], corner_radius=12,
-                        border_width=1, border_color=T["borda"], **kw)
-
-
-def rotulo(master, texto: str, tamanho: int = 13, peso: str = "normal", cor: str | None = None, **kw):
-    return ctk.CTkLabel(master, text=texto, font=fonte(tamanho, peso), text_color=cor or T["texto"],
-                        anchor="w", justify="left", **kw)
+from tema_ui import (AZUL_PADRAO, FONTE, RAIZ, T, _misturar, _versao_instalada, aumentar_abas, cartao, fonte,  # noqa: F401
+                     realcar_abas, rotulo, segmentado_das_abas)  # noqa: F401
 
 
 # ============================================================================ janela
@@ -113,11 +56,15 @@ class App(ctk.CTk):
         self.executor = Executor(settings, self.caminho_db)
         self.rotas = {r.rotulo: r.chave for r in settings.rotas.values()}
         self.arquivo = ""
+        self._ultimo_pedido = None          # (ClaimRequest, modo) da última execução iniciada
+        self._fechando = False
+        self._ultimo_fim = None             # (estado, mensagem) do último fim de execução
+        self._espera_fechar = 0
         self.tocados: set[str] = set()
         self._validacao_agendada: str | None = None
 
         self.report_callback_exception = self._erro_inesperado
-        self.title("Automação de Claims · CLM1")
+        self.title("Automação Comercial · Cotações e Claims")
         self.geometry("1220x800")
         self.minsize(1080, 720)
         self.configure(fg_color=T["fundo"])
@@ -135,13 +82,21 @@ class App(ctk.CTk):
                                    segmented_button_unselected_color=T["cartao"],
                                    segmented_button_unselected_hover_color=T["azul_claro"],
                                    text_color=T["texto"], anchor="w",
-                                   command=lambda: self._realcar(self.abas._segmented_button))
+                                   command=lambda: self._realcar(segmentado_das_abas(self.abas)))
         self.abas.pack(fill="both", expand=True, padx=20, pady=(4, 16))
+        self.aba_cotacao = None
+        aba_nova_cotacao = self.abas.add("Nova cotação") if self.cfg.cotacao else None
         self._aba_novo(self.abas.add("Novo claim"))
         self._aba_historico(self.abas.add("Histórico"))
+        aba_cotacoes = self.abas.add("Cotações") if self.cfg.cotacao else None
         self._aba_pendencias(self.abas.add("Pendências"))
+        if aba_nova_cotacao is not None:
+            from ui_cotacao import AbaCotacao      # depois do tema e das abas de claim
+            self.aba_cotacao = AbaCotacao(self, aba_nova_cotacao, aba_cotacoes)
 
-        self._realcar(self.abas._segmented_button)
+        # Abas grandes e bem visíveis (Nova cotação, Novo claim...)
+        aumentar_abas(segmentado_das_abas(self.abas), fonte(15, "bold"))
+        self._realcar(segmentado_das_abas(self.abas))
         self._resetar_etapas()
         self._atualizar_listas()
         self._verificar_sap()
@@ -170,10 +125,10 @@ class App(ctk.CTk):
 
         titulos = ctk.CTkFrame(topo, fg_color="transparent")
         titulos.pack(side="left", pady=12)
-        rotulo(titulos, "Automação de Claims", 18, "bold", T["azul"]).pack(anchor="w")
+        rotulo(titulos, "Automação Comercial", 18, "bold", T["azul"]).pack(anchor="w")
         versao = _versao_instalada()
-        rotulo(titulos, f"Transação CLM1 · Nota {self.cfg.tipo_nota} · Comercial · {versao}", 12,
-               cor=T["suave"]).pack(anchor="w")
+        transacoes = "Cotação VA21/VA22 · Claim CLM1" if self.cfg.cotacao else f"Claim CLM1 · Nota {self.cfg.tipo_nota}"
+        rotulo(titulos, f"{transacoes} · Comercial · {versao}", 12, cor=T["suave"]).pack(anchor="w")
 
         lado = ctk.CTkFrame(topo, fg_color="transparent")
         lado.pack(side="right", padx=24)
@@ -203,9 +158,7 @@ class App(ctk.CTk):
         corpo = ctk.CTkScrollableFrame(caixa, fg_color="transparent")
         corpo.pack(fill="both", expand=True, padx=8, pady=8)
 
-        rotulo(corpo, "Novo claim", 20, "bold").pack(anchor="w", padx=12, pady=(4, 0))
-        rotulo(corpo, "Preencha os dados recebidos. Os valores fixos do processo são aplicados automaticamente.",
-               12, cor=T["suave"], wraplength=560, height=18).pack(anchor="w", padx=12, pady=(0, 6))
+        rotulo(corpo, "Novo claim", 20, "bold").pack(anchor="w", padx=12, pady=(4, 4))
 
         self.erros: dict[str, ctk.CTkLabel] = {}
 
@@ -259,6 +212,14 @@ class App(ctk.CTk):
         self.item = self._entrada(col_item, "Ex.: 10")
         self.item.bind("<KeyRelease>", lambda _: self._mudou("item"))
         self._erro(col_item, "item")
+        self.linha_nova = ctk.BooleanVar(value=False)
+        self.chk_linha_nova = ctk.CTkCheckBox(corpo, text="Criar linha nova na cotação (o item é criado na VA22 e recebe o claim)",
+                        variable=self.linha_nova, font=fonte(12), text_color=T["texto"], fg_color=T["azul"],
+                        hover_color=T["azul_hover"], border_color=T["borda"], checkbox_width=18,
+                        checkbox_height=18, command=self._mudou_linha_nova)
+        self.chk_linha_nova.pack(anchor="w", padx=12, pady=(2, 0))
+        self.linha_info = rotulo(corpo, "", 11, cor=T["suave"], wraplength=560, height=16)
+        self.linha_info.pack(anchor="w", padx=12, pady=(1, 0))
 
         # Arquivo
         self._titulo_campo(corpo, "Arquivo anexo")
@@ -274,20 +235,12 @@ class App(ctk.CTk):
         rotulo(corpo, "Vários arquivos? Junte em um único ZIP. O nome do arquivo vira a descrição do documento.",
                11, cor=T["suave"], wraplength=560, height=18).pack(anchor="w", padx=12, pady=(3, 0))
         self.sem_anexo = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(corpo, text="Este claim não tem anexo", variable=self.sem_anexo, font=fonte(12),
+        self.chk_sem_anexo = ctk.CTkCheckBox(corpo, text="Este claim não tem anexo", variable=self.sem_anexo, font=fonte(12),
                         text_color=T["texto"], fg_color=T["azul"], hover_color=T["azul_hover"],
                         border_color=T["borda"], checkbox_width=18, checkbox_height=18,
-                        command=self._mudou_sem_anexo).pack(anchor="w", padx=12, pady=(6, 0))
+                        command=self._mudou_sem_anexo)
+        self.chk_sem_anexo.pack(anchor="w", padx=12, pady=(6, 0))
         self._erro(corpo, "arquivo")
-
-        # Valores fixos
-        prioridade = "Normal" if self.cfg.prioridade == "1" else self.cfg.prioridade
-        fixos = ctk.CTkFrame(corpo, fg_color=T["azul_claro"], corner_radius=8)
-        fixos.pack(fill="x", padx=12, pady=(14, 6))
-        rotulo(fixos, "Aplicado automaticamente", 11, "bold", T["azul"]).pack(anchor="w", padx=12, pady=(8, 0))
-        rotulo(fixos, f"Nota {self.cfg.tipo_nota} · Causa {self.cfg.causa_grupo}/{self.cfg.causa_codigo} · "
-                      f"Prioridade {prioridade} · Documento {self.cfg.doc_tipo}/{self.cfg.doc_laboratorio} · "
-                      f"Comercial = seu usuário SAP", 12, wraplength=540).pack(anchor="w", padx=12, pady=(0, 8))
 
         # Rodapé: modo + ações
         rodape = ctk.CTkFrame(caixa, fg_color="transparent")
@@ -327,9 +280,7 @@ class App(ctk.CTk):
     @staticmethod
     def _realcar(segmentado) -> None:
         """Texto branco no botão selecionado e escuro nos demais (contraste sobre o azul)."""
-        atual = segmentado.get()
-        for valor, botao in getattr(segmentado, "_buttons_dict", {}).items():
-            botao.configure(text_color="#FFFFFF" if valor == atual else T["texto"])
+        realcar_abas(segmentado, T["texto"])
 
     def _titulo_campo(self, master, texto: str) -> ctk.CTkFrame:
         linha = ctk.CTkFrame(master, fg_color="transparent")
@@ -456,12 +407,33 @@ class App(ctk.CTk):
         self.tabela_pend = self._tabela(aba)
 
     def _resolver(self, criado: bool) -> None:
+        if self.executor.ocupado:
+            # A própria execução em andamento aparece na lista: resolver agora mentiria no histórico.
+            messagebox.showinfo("Pendências", "Há uma execução em andamento. Aguarde terminar para resolver.")
+            return
         selecao = self.tabela_pend.selection()
         if not selecao:
             messagebox.showinfo("Pendências", "Selecione uma execução na lista.")
             return
         valores = self.tabela_pend.item(selecao[0], "values")
         execucao_id, ordem = valores[-1], valores[3]
+        linha_existe = None
+        try:
+            db = Storage(self.caminho_db)
+            try:
+                linha = db.obter(execucao_id).linha_criada or ""
+            finally:
+                db.close()
+        except Exception:  # noqa: BLE001
+            linha = ""
+        if linha.startswith("?"):
+            resposta = messagebox.askyesnocancel(
+                "Linha da cotação",
+                f"Esta execução enviou a linha {linha[1:]} para a cotação {ordem.split('/')[0]}, sem confirmação.\n\n"
+                f"Confira na VA23: a linha {linha[1:]} EXISTE na cotação?")
+            if resposta is None:
+                return
+            linha_existe = resposta
         numero = ""
         if criado:
             dialogo = ctk.CTkInputDialog(title="Claim criado",
@@ -473,15 +445,18 @@ class App(ctk.CTk):
         else:
             pergunta = (f"Confirma que o claim da execução {execucao_id} (ordem {ordem}) NÃO existe no SAP?\n\n"
                         "Isso libera uma nova execução para esta ordem/item.")
+            if linha.lstrip("?") and linha_existe is not False:
+                pergunta += (f"\n\nA linha {linha.lstrip('?')} continua registrada: crie o claim dela pelo programa, "
+                             "SEM marcar 'Criar linha nova'.")
         if not messagebox.askyesno("Resolver pendência", pergunta, icon="warning"):
             return
         try:
             db = Storage(self.caminho_db)
             try:
-                resolver_pendencia(db, execucao_id, criado=criado, numero_nota=numero)
+                resolver_pendencia(db, execucao_id, criado=criado, numero_nota=numero, linha_existe=linha_existe)
             finally:
                 db.close()
-        except (ValueError, KeyError) as erro:
+        except Exception as erro:  # noqa: BLE001 - qualquer recusa vira mensagem (nada foi mudado)
             messagebox.showerror("Resolver pendência", str(erro))
             return
         self._atualizar_listas()
@@ -491,7 +466,54 @@ class App(ctk.CTk):
         for e in execucoes:
             tabela.insert("", "end", values=linha_historico(e), tags=(TOM_ESTADO.get(e.estado, "neutro"),))
 
+    def preparar_claim(self, ordem: str, item: str, rota: str) -> None:
+        """Vindo da cotação: abre "Novo claim" com cotação, item e tipo já preenchidos."""
+        if self.executor.ocupado:
+            messagebox.showinfo("Aguarde", "Há uma execução em andamento. Aguarde terminar.")
+            return
+        conteudo = (self.descricao.get().strip() or self.texto.get("1.0", "end-1c").strip() or self.arquivo
+                    or self.sem_anexo.get())
+        if conteudo and not messagebox.askyesno(
+                "Novo claim", "O formulário de claim tem dados de outro claim (descrição, texto ou anexo).\n\n"
+                              "Apagar esses dados e preencher para este item?"):
+            return
+        self._limpar_conteudo_claim()
+        self.abas.set("Novo claim")
+        self._realcar(segmentado_das_abas(self.abas))
+        rotulos = {chave: rotulo_rota for rotulo_rota, chave in self.rotas.items()}
+        self.tipo.set(rotulos.get(rota, ""))
+        self._realcar(self.tipo)
+        self.linha_nova.set(False)
+        self.item.configure(state="normal", placeholder_text="Ex.: 10")
+        self.linha_info.configure(text="")
+        for campo, valor in ((self.ordem, ordem), (self.item, item)):
+            campo.delete(0, "end")
+            campo.insert(0, valor)
+        for campo in ("tipo", "ordem", "item"):
+            self._mudou(campo)
+        self._resetar_etapas()
+        self._mostrar_resultado_texto("neutro", "Da cotação",
+                                      f"Cotação {ordem}, item {item} preenchidos. Complete descrição, texto e anexo.")
+        self.descricao.focus_set()
+
+    def _limpar_conteudo_claim(self) -> None:
+        """Apaga o que é de UM claim (descrição, texto, anexo, item, linha nova). Tipo e ordem ficam."""
+        self.descricao.delete(0, "end")
+        self.texto.delete("1.0", "end")
+        self.arquivo = ""
+        self.sem_anexo.set(False)
+        self.btn_arquivo.configure(state="normal")
+        self.arq_nome.configure(text="Nenhum arquivo selecionado", text_color=T["suave"])
+        self.linha_nova.set(False)
+        self.item.configure(state="normal", placeholder_text="Ex.: 10")
+        self.item.delete(0, "end")
+        self.linha_info.configure(text="")
+        self.contador.configure(text=f"0/{self.cfg.limites.descricao_max}", text_color=T["suave"])
+        self.tocados.difference_update({"descricao", "texto_livre", "item", "arquivo"})
+
     def _atualizar_listas(self) -> None:
+        if getattr(self, "aba_cotacao", None) is not None:
+            self.aba_cotacao.atualizar_lista()
         try:
             db = Storage(self.caminho_db)
             try:
@@ -520,6 +542,7 @@ class App(ctk.CTk):
             "item": self.item.get(),
             "arquivo": self.arquivo,
             "sem_anexo": self.sem_anexo.get(),
+            "linha_nova": self.linha_nova.get(),
         }
 
     def _mudou(self, campo: str) -> None:
@@ -529,6 +552,7 @@ class App(ctk.CTk):
             self.contador.configure(text=f"{n}/{maximo}", text_color=T["erro"] if n > maximo else T["suave"])
         if campo == "tipo":
             self._mostrar_rota()
+            self._mostrar_linha()
         if self._validacao_agendada:
             self.after_cancel(self._validacao_agendada)
         self._validacao_agendada = self.after(250, self._mostrar_erros)
@@ -544,6 +568,31 @@ class App(ctk.CTk):
         nomes = [f"{a.descricao} · {a.subgrupo}" if contagem[a.descricao] > 1 else a.descricao for a in atividades]
         self.rota_info.configure(text=f"Rota ({len(atividades)} atividades): " + "  →  ".join(nomes),
                                  text_color=T["azul"])
+
+    def _mudou_linha_nova(self) -> None:
+        if self.linha_nova.get():
+            self.item.delete(0, "end")
+            self.item.configure(state="disabled", placeholder_text="automático")
+        else:
+            self.item.configure(state="normal", placeholder_text="Ex.: 10")
+        self._mostrar_linha()
+        if not self.executor.ocupado:
+            self._resetar_etapas()
+        self._mudou("item")
+
+    def _mostrar_linha(self) -> None:
+        if not self.linha_nova.get():
+            self.linha_info.configure(text="")
+            return
+        chave = self.rotas.get(self.tipo.get())
+        if not chave:
+            self.linha_info.configure(text="Escolha o tipo: o material da linha vem dele.", text_color=T["suave"])
+            return
+        rota = self.cfg.rota(chave)
+        self.linha_info.configure(
+            text=f"Linha nova: material {rota.material or '—'} · centro {rota.centro or '—'} · "
+                 f"quantidade {self.cfg.linha_quantidade}. O número do item é o próximo livre (de 10 em 10).",
+            text_color=T["azul"])
 
     def _mostrar_erros(self) -> dict[str, str]:
         self._validacao_agendada = None
@@ -592,6 +641,7 @@ class App(ctk.CTk):
     def _limpar_tudo(self) -> None:
         """Prepara a tela para um novo claim: formulário, andamento e resultado."""
         if self.executor.ocupado:
+            messagebox.showinfo("Limpar tudo", "Aguarde a execução em andamento terminar.", parent=self)
             return
         if self._tem_dados() and not messagebox.askyesno(
             "Limpar tudo", "Apagar os dados preenchidos e começar um novo claim?"
@@ -615,6 +665,9 @@ class App(ctk.CTk):
         self.texto.delete("1.0", "end")
         self.arquivo = ""
         self.sem_anexo.set(False)
+        self.linha_nova.set(False)
+        self.item.configure(state="normal", placeholder_text="Ex.: 10")
+        self.linha_info.configure(text="")
         self.btn_arquivo.configure(state="normal")
         self.arq_nome.configure(text="Nenhum arquivo selecionado", text_color=T["suave"])
         self.rota_info.configure(text="Escolha o tipo para ver a rota de atividades.", text_color=T["suave"])
@@ -635,7 +688,13 @@ class App(ctk.CTk):
         return "Criar claim" if self.producao else "Executar"
 
     def _executar(self) -> None:
-        if self.executor.ocupado or not self._validar_tudo():
+        if self.executor.ocupado:
+            texto = ("Verificando a conexão com o SAP (alguns segundos). Tente de novo em seguida."
+                     if self.executor.verificando else "Há uma execução em andamento.")
+            messagebox.showinfo("Aguarde", texto, parent=self)
+            return
+        if not self._validar_tudo():
+            self.msg_resultado.configure(text="Corrija os campos marcados em vermelho.", text_color=T["erro"])
             return
         modo = self._modo_escolhido()
         avisos = {
@@ -653,27 +712,68 @@ class App(ctk.CTk):
             if not pergunta(titulo, texto + "\n\nNão use a janela que a automação abrir até terminar.",
                             icon="warning" if modo != "ENSAIO" else "info"):
                 return
+        self._comecar(montar_request(self._campos()), modo)
+
+    def _travar_formulario(self, travar: bool) -> None:
+        """Durante a execução o formulário não muda: o que se vê é o que está sendo gravado, e nada
+        digitado para o próximo claim se perde quando o atual termina."""
+        estado = "disabled" if travar else "normal"
+        for w in (self.descricao, self.ordem, self.texto, self.tipo, self.chk_linha_nova, self.chk_sem_anexo):
+            try:
+                w.configure(state=estado)
+            except Exception:  # noqa: BLE001 - só aparência
+                pass
+        self.item.configure(state="disabled" if travar or self.linha_nova.get() else "normal")
+        self.btn_arquivo.configure(state="disabled" if travar or self.sem_anexo.get() else "normal")
+
+    def _comecar(self, req, modo: str) -> None:
+        self._ultimo_pedido = (req, modo)
+        self._travar_formulario(True)
         self._resetar_etapas()
         self._mostrar_resultado_texto("neutro", "Em andamento", "Executando…")
         self.btn_executar.configure(state="disabled", text="Executando…")
         self.btn_interromper.configure(state="normal")
         self.btn_limpar.configure(state="disabled")
-        self.executor.iniciar(montar_request(self._campos()), modo)
+        try:
+            self.executor.iniciar(req, modo)
+        except Exception as erro:  # noqa: BLE001 - recusado antes de começar: a tela volta ao normal
+            self._travar_formulario(False)
+            self.btn_executar.configure(state="normal", text=self._texto_executar())
+            self.btn_interromper.configure(state="disabled", text="Interromper")
+            self.btn_limpar.configure(state="normal")
+            self._mostrar_resultado_texto("atencao", "Não iniciado", f"{erro} Nada foi gravado.")
 
     def _interromper(self) -> None:
         self.executor.interromper()
         self.btn_interromper.configure(state="disabled", text="Parando…")
 
     def _verificar_sap(self) -> None:
+        if self.executor.ocupado:
+            messagebox.showinfo("Verificar SAP", "Aguarde a execução em andamento terminar.", parent=self)
+            return
         self.chip_sap.configure(text="  SAP: verificando…  ", fg_color=T["borda"], text_color=T["suave"])
-        self.executor.verificar_sap()
+        try:
+            self.executor.verificar_sap()
+        except RuntimeError as exc:
+            messagebox.showinfo("Verificar SAP", str(exc), parent=self)
 
     def _processar_fila(self) -> None:
-        for evento in self.executor.drenar():
-            self._tratar(evento)
-        self.after(100, self._processar_fila)
+        try:
+            for evento in self.executor.drenar():
+                try:
+                    self._tratar(evento)
+                except Exception:  # noqa: BLE001 - um evento com problema não pode parar a tela
+                    logging.getLogger("claim.ui").exception("evento %s", getattr(evento, "tipo", "?"))
+        finally:
+            self.after(100, self._processar_fila)
 
     def _tratar(self, evento: Evento) -> None:
+        if evento.tipo in ("fim", "erro"):
+            r = evento.resultado
+            self._ultimo_fim = (getattr(r, "estado", None), getattr(r, "mensagem", None) or evento.detalhe)
+        if evento.origem == "cotacao" and self.aba_cotacao is not None:
+            self.aba_cotacao.tratar(evento)
+            return
         if evento.tipo == "etapa":
             self._marcar_etapa(evento.etapa, evento.situacao, evento.detalhe)
         elif evento.tipo == "sap":
@@ -685,6 +785,7 @@ class App(ctk.CTk):
                                         text_color=T["erro"])
                 self._mostrar_resultado_texto("atencao", "SAP", evento.detalhe)
         elif evento.tipo in ("fim", "erro"):
+            self._travar_formulario(False)
             self.btn_executar.configure(state="normal", text=self._texto_executar())
             self.btn_interromper.configure(state="disabled", text="Interromper")
             self.btn_limpar.configure(state="normal")
@@ -697,7 +798,7 @@ class App(ctk.CTk):
     def _resetar_etapas(self) -> None:
         self.barra.set(0)
         modo = self._modo_escolhido() if (self.producao or hasattr(self, "modo")) else "SIMULACAO"
-        do_modo = {c for c, _ in etapas_do_modo(modo)}
+        do_modo = {c for c, _ in etapas_do_modo(modo, self.linha_nova.get())}
         for chave, (icone, nome, detalhe) in self.etapas.items():
             ativa = chave in do_modo
             icone.configure(text="○", text_color=T["inativo"])
@@ -721,7 +822,7 @@ class App(ctk.CTk):
             icone.configure(text="✕", text_color=T["erro"])
             nome.configure(font=fonte(13, "bold"))
             rot.configure(text="falhou", text_color=T["erro"])
-        do_modo = [c for c, _ in etapas_do_modo(self._modo_escolhido())]
+        do_modo = [c for c, _ in etapas_do_modo(self._modo_escolhido(), self.linha_nova.get())]
         feitas = sum(1 for c in do_modo if self.etapas[c][0].cget("text") == "✓")
         self.barra.set(feitas / max(1, len(do_modo)))
 
@@ -738,6 +839,9 @@ class App(ctk.CTk):
         linhas = [f"Execução {r.execucao_id}"]
         if r.numero_nota:
             linhas.append(f"CLAIM CRIADO: nota {r.numero_nota}")
+        if r.linha_criada:
+            item = r.linha_criada.lstrip("?")
+            linhas.append(f"LINHA NA COTAÇÃO: item {item}" + (" (sem confirmação)" if r.linha_criada.startswith("?") else ""))
         if r.documento_dms:
             linhas.append(f"Documento ZDC: {r.documento_dms}")
         for p in r.problemas:
@@ -760,9 +864,29 @@ class App(ctk.CTk):
         if r.estado in (Estado.ENSAIO_CONCLUIDO, Estado.CONCLUIDO) and self._modo_escolhido() != "SIMULACAO":
             self.bell()
         if r.estado == Estado.CONCLUIDO and r.numero_nota:
-            self.clipboard_clear()
-            self.clipboard_append(r.numero_nota)
-            self.msg_resultado.configure(text=f"{r.mensagem} O número foi copiado para a área de transferência.")
+            # Formulário pronto para o PRÓXIMO claim: um segundo clique não repete este (nem a linha nova).
+            # Antes de tudo, para nenhuma falha depois (área de transferência) deixar o formulário cheio.
+            self._limpar_conteudo_claim()
+            try:
+                self.clipboard_clear()
+                self.clipboard_append(r.numero_nota)
+            except Exception:  # noqa: BLE001 - só conveniência
+                logging.getLogger("claim.ui").exception("área de transferência")
+            # O tipo também sai: o próximo item pode ser de outro equipamento (ex.: 20 = Produto B) e o tipo
+            # decide a rota e os responsáveis. Só a ordem continua.
+            self.tipo.set("")
+            self._realcar(self.tipo)
+            self._mostrar_erros()
+            self.msg_resultado.configure(text=f"{r.mensagem} O número foi copiado para a área de transferência. "
+                                              "A ordem continua preenchida; escolha o tipo e o item do próximo claim.")
+        if r.confirmar == "linha_extra" and self._ultimo_pedido is not None and not self._fechando:
+            req, modo = self._ultimo_pedido
+            if messagebox.askyesno("Outra linha nova?",
+                                   f"{r.mensagem}\n\nCriar MAIS UMA linha nova ({req.tipo}) na cotação {req.ordem}, "
+                                   "com documento ZDC e claim, GRAVANDO no SAP?",
+                                   icon="warning", default="no"):
+                from dataclasses import replace
+                self._comecar(replace(req, confirmar_linha_extra=True), modo)
 
     # ------------------------------------------------------------------ encerramento
 
@@ -773,15 +897,57 @@ class App(ctk.CTk):
                              f"{valor}\n\nO detalhe foi registrado no log. Se repetir, avise o responsável "
                              "pela ferramenta.")
 
+    def _ocupado_para_fechar(self) -> bool:
+        from tema_ui import EmSegundoPlano
+        return self.executor.ocupado or any(e.ativo for e in EmSegundoPlano.em_andamento)
+
     def _fechar(self) -> None:
-        if self.executor.ocupado and not messagebox.askyesno(
+        if self._ocupado_para_fechar() and not messagebox.askyesno(
             "Execução em andamento",
-            "Há uma execução em andamento. Deseja interromper e fechar?",
+            "Há uma execução (ou criação de pastas) em andamento. Deseja interromper e fechar?",
         ):
             return
         self.executor.interromper()
-        self.destroy()
+        if self._ocupado_para_fechar():
+            self._fechando = True
+            # Matar a thread no meio de uma chamada ao SAP (ou da criação das pastas na rede) deixaria
+            # o documento sem registro no histórico. A parada é atendida no fim da etapa atual.
+            self.protocol("WM_DELETE_WINDOW", lambda: None)
+            self.title("Automação Comercial  ·  fechando: terminando a etapa atual…")
+            messagebox.showinfo("Fechando", "A execução vai parar no fim da etapa atual (pode levar alguns "
+                                "segundos). O resultado aparece antes de o programa fechar.", parent=self)
+            self._ultimo_fim = None
+            self._fechar_quando_livre()
+            return
+        self._encerrar()
 
+    def _fechar_quando_livre(self) -> None:
+        # _processar_fila continua mostrando os eventos; o histórico é gravado pela própria thread.
+        self._espera_fechar += 1
+        if self._ocupado_para_fechar():
+            if self._espera_fechar % 600 == 0 and messagebox.askyesno(     # a cada ~2 minutos
+                    "SAP sem resposta", "A etapa atual ainda não terminou (o SAP ou a rede podem estar "
+                    "travados).\n\nFechar mesmo assim? Depois confira no SAP e resolva a execução na aba "
+                    "Pendências/Cotações.", icon="warning", default="no", parent=self):
+                self.destroy()
+                return
+            self.after(200, self._fechar_quando_livre)
+            return
+        if self._ultimo_fim is None and self._espera_fechar < 25:     # o evento final ainda na fila
+            self.after(200, self._fechar_quando_livre)
+            return
+        if self._ultimo_fim is not None:
+            estado, mensagem = self._ultimo_fim
+            rotulo = ROTULO_ESTADO.get(estado, getattr(estado, "value", "Resultado")) if estado else "Resultado"
+            messagebox.showinfo(f"Antes de fechar: {rotulo}", mensagem or "Execução encerrada.", parent=self)
+        self._encerrar()
+
+    def _encerrar(self) -> None:
+        try:
+            self.executor.fechar_janela_mantida()
+        except Exception:  # noqa: BLE001 - fechando
+            logging.getLogger("claim.ui").exception("fechar janela mantida")
+        self.destroy()
 
 def main() -> None:
     try:
@@ -791,8 +957,18 @@ def main() -> None:
         messagebox.showerror("Configuração", f"Erro no settings.ini:\n\n{erro}")
         return
     configurar_logs(settings.pasta_dados)
-    ctk.set_appearance_mode("light")
-    App(settings).mainloop()
+    from tema_ui import InstanciaUnica
+    trava = InstanciaUnica(settings.pasta_dados)
+    if not trava.adquirir():
+        tk.Tk().withdraw()
+        messagebox.showinfo("Automação Comercial", "O programa já está aberto neste computador.\n\n"
+                            "Use a janela que já está aberta (veja na barra de tarefas).")
+        return
+    try:
+        ctk.set_appearance_mode("light")
+        App(settings).mainloop()
+    finally:
+        trava.liberar()
 
 
 if __name__ == "__main__":
