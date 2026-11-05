@@ -408,10 +408,10 @@ class SapClient:
         self._colunas_cache.clear()
         self._campos_cache.clear()
         self._aba_atual = ""
-        self._el(OKCODE, "abrir VA22").text = "/nVA22"
+        self._preencher(OKCODE, "abrir VA22", "/nVA22")
         self._vkey(0)
         self._falhar_se_erro("abrir VA22")
-        self._el(COTACAO_NUMERO, "número da cotação").text = cotacao
+        self._preencher(COTACAO_NUMERO, "número da cotação", cotacao)
         self._vkey(0)
         msg = self.status()                        # ex.: cotação inexistente ou bloqueada por outro usuário
         if msg.e_erro:
@@ -553,14 +553,14 @@ class SapClient:
         self._colunas_cache.clear()
         self._campos_cache.clear()
         self._aba_atual = ""
-        self._el(OKCODE, "abrir VA21").text = "/nVA21"
+        self._preencher(OKCODE, "abrir VA21", "/nVA21")
         self._vkey(0)
         self._falhar_se_erro("abrir VA21")
         for campo, valor, nome in ((VA21_TIPO, tipo_documento, "tipo de cotação"),
                                    (VA21_ORGANIZDCAO, organizacao, "organização de vendas"),
                                    (VA21_CANAL, canal, "canal"), (VA21_SETOR, setor, "setor"),
                                    (VA21_ESCRITORIO, escritorio, "escritório"), (VA21_EQUIPE, equipe, "equipe")):
-            self._el(campo, nome).text = valor
+            self._preencher(campo, nome, valor)
         self._vkey(0)
         self._falhar_se_erro("dados iniciais da cotação")
         try:
@@ -574,16 +574,16 @@ class SapClient:
                           codigo_postal: str) -> Popup | None:
         """Emissor genérico + janela de endereço. Devolve a janela que sobrar aberta (o serviço decide)."""
         self._exigir_janela()
-        self._el(VA21_EMISSOR, "emissor").text = emissor
+        self._preencher(VA21_EMISSOR, "emissor", emissor)
         self._vkey(0)
         self._falhar_se_erro("emissor")
         if self._s.Children.Count < 2:
             raise ElementoNaoEncontrado("A janela de endereço do cliente não abriu.", etapa="endereço do cliente")
         self._el(END_TITULO, "título do endereço").key = titulo
-        self._el(END_NOME, "nome do cliente").text = nome
-        self._el(END_CIDADE, "cidade/projeto").text = cidade
+        self._preencher(END_NOME, "nome do cliente", nome)
+        self._preencher(END_CIDADE, "cidade/projeto", cidade)
         if codigo_postal:
-            self._el(END_CEP, "código postal").text = codigo_postal
+            self._preencher(END_CEP, "código postal", codigo_postal)
         self._el(END_OK, "confirmar endereço").press()
         self._esperar_livre()
         self._falhar_se_erro("endereço do cliente")
@@ -607,7 +607,7 @@ class SapClient:
         if primeiro.tipo == "W" and segundo.tipo == "W" and segundo.texto != primeiro.texto:
             raise ValorRejeitado(f"Dois avisos seguidos na validade: '{primeiro.texto}' e '{segundo.texto}'. "
                                  "Nada foi gravado", etapa="validade da cotação")
-        self._el(VA21_REFERENCIA, "referência cliente/projeto").text = referencia
+        self._preencher(VA21_REFERENCIA, "referência cliente/projeto", referencia)
         return primeiro if primeiro.tipo == "W" else segundo
 
     def preencher_linhas_novas(self, linhas: list[tuple[str, str, str]]) -> list[LinhaPreenchida]:
@@ -665,8 +665,8 @@ class SapClient:
         self._el(VA21_ABA_ADICIONAIS, "aba dados adicionais").select()
         self._esperar_livre()
         self._falhar_se_erro("dados adicionais")
-        self._el(VA21_DATA_RECEBIMENTO, "data de recebimento do pedido").text = data
-        self._el(VA21_HORA_RECEBIMENTO, "hora de recebimento do pedido").text = hora
+        self._preencher(VA21_DATA_RECEBIMENTO, "data de recebimento do pedido", data)
+        self._preencher(VA21_HORA_RECEBIMENTO, "hora de recebimento do pedido", hora)
         return self.status()
 
     def gravar_cotacao_nova(self) -> StatusMessage:
@@ -910,7 +910,7 @@ class SapClient:
 
     def abrir_criacao(self, tipo_nota: str) -> None:
         self._exigir_janela()
-        self._el(OKCODE, "abrir CLM1").text = "/nCLM1"
+        self._preencher(OKCODE, "abrir CLM1", "/nCLM1")
         self._vkey(0)
         self._falhar_se_erro("abrir CLM1")
 
@@ -924,13 +924,13 @@ class SapClient:
                        causa_codigo: str, prioridade: str, ordem: str, item: str) -> None:
         self._exigir_janela()
         # Texto livre escrito UMA vez (o SAP acrescenta data/hora/usuário sozinho).
-        self._el(TEXTO_LIVRE, "texto livre").text = texto_livre.replace("\n", "\r")
-        self._el(DESCRICAO, "descrição").text = descricao
-        self._el(CAUSA_GRUPO, "causa - grupo").text = causa_grupo
-        self._el(CAUSA_CODIGO, "causa - código").text = causa_codigo
+        self._preencher(TEXTO_LIVRE, "texto livre", texto_livre.replace("\n", "\r"))
+        self._preencher(DESCRICAO, "descrição", descricao)
+        self._preencher(CAUSA_GRUPO, "causa - grupo", causa_grupo)
+        self._preencher(CAUSA_CODIGO, "causa - código", causa_codigo)
         self._el(PRIORIDADE, "prioridade").key = prioridade
-        self._el(ORDEM, "ordem do cliente").text = ordem
-        self._el(ITEM, "item da ordem").text = item
+        self._preencher(ORDEM, "ordem do cliente", ordem)
+        self._preencher(ITEM, "item da ordem", item)
 
     def enter(self) -> StatusMessage:
         self._exigir_janela()
@@ -1128,15 +1128,15 @@ class SapClient:
         self._vkey(0)
         self._falhar_se_erro("1ª tela do documento")
 
-        self._el(DOC_DESCRICAO, "descrição do documento").text = descricao
-        self._el(DOC_LABORATORIO, "Lab./escr.").text = laboratorio
+        self._preencher(DOC_DESCRICAO, "descrição do documento", descricao)
+        self._preencher(DOC_LABORATORIO, "Lab./escr.", laboratorio)
         self._vkey(0)
         self._falhar_se_erro("dados do documento")
 
         self._el(DOC_PROCURAR_ARQUIVO, "procurar arquivo").press()
         self._esperar_livre()
-        self._el(ARQ_PASTA, "pasta do arquivo").text = str(arquivo.parent) + "\\"
-        self._el(ARQ_NOME, "nome do arquivo").text = arquivo.name
+        self._preencher(ARQ_PASTA, "pasta do arquivo", str(arquivo.parent) + "\\")
+        self._preencher(ARQ_NOME, "nome do arquivo", arquivo.name)
         self._el(ARQ_OK, "confirmar arquivo").press()
         self._esperar_livre()
         if self._s.Children.Count > 1:          # o SAP pergunta a aplicação (ex.: PDF, ZIP)
@@ -1221,7 +1221,7 @@ class SapClient:
             self.fechar_janela()
             return
         try:
-            self._el(OKCODE, "voltar ao menu").text = "/n"
+            self._preencher(OKCODE, "voltar ao menu", "/n")
             self._vkey(0)
             if self._s.Children.Count > 1 or _ler_info(self._s).transacao not in TRANSACOES_MENU:
                 raise RuntimeError("a janela não voltou ao menu")
@@ -1250,6 +1250,21 @@ class SapClient:
             return self._s.findById(id_tecnico)
         except Exception as erro:  # noqa: BLE001 - com_error do SAP
             raise ElementoNaoEncontrado(f"Elemento não encontrado: {id_tecnico} ({erro})", etapa=etapa) from erro
+
+    def _preencher(self, id_tecnico: str, etapa: str, valor: str) -> None:
+        """Escreve num campo; se o SAP recusar, diz QUAL campo e o tamanho (antes: "'<unknown>.text' can not be set")."""
+        campo = self._el(id_tecnico, etapa)
+        try:
+            campo.text = valor
+        except Exception as erro:  # noqa: BLE001 - com_error/AttributeError do pywin32
+            maximo = getattr(campo, "MaxLength", 0)
+            maximo = maximo if isinstance(maximo, int) and maximo > 0 else 0
+            tamanho = len(str(valor))
+            dica = (f" O campo aceita até {maximo} caracteres e o valor tem {tamanho}." if maximo and tamanho > maximo
+                    else f" (valor com {tamanho} caracteres)")
+            if etapa == "descrição do documento":
+                dica += " O nome do arquivo vira essa descrição: renomeie o arquivo com um nome mais curto."
+            raise ValorRejeitado(f"O SAP não aceitou o valor no campo '{etapa}'.{dica} ({erro})", etapa=etapa) from erro
 
     def _vkey(self, tecla: int) -> None:
         self._s.findById("wnd[0]").sendVKey(tecla)

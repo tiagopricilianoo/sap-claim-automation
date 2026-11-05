@@ -126,3 +126,40 @@ def test_sem_arquivo_e_sem_marcar_continua_obrigatorio(request_valido, settings)
 def test_arquivo_e_sem_anexo_ao_mesmo_tempo_e_contraditorio(request_valido, settings):
     req = ClaimRequest.from_form(**_form(request_valido), sem_anexo=True)
     assert campos(validate(req, settings)) == {"arquivo"}
+
+
+def test_nome_do_arquivo_limitado_a_40_mesmo_com_settings_maior(request_valido, settings, tmp_path):
+    """05/11/2026: com 255 no settings.ini, um nome de 46 caracteres passava e o SAP recusava na tela do documento."""
+    from dataclasses import replace
+    cfg = replace(settings, limites=replace(settings.limites, descricao_documento_max=255))
+    longo = tmp_path / ("p" * 42 + ".pdf")     # 46 caracteres
+    longo.write_bytes(b"x")
+    problemas = validate(ClaimRequest.from_form(**{**_form(request_valido), "arquivo": str(longo)}), cfg)
+    assert campos(problemas) == {"arquivo"} and "até 40" in problemas[0].mensagem
+    curto = tmp_path / ("p" * 36 + ".pdf")     # 40 caracteres
+    curto.write_bytes(b"x")
+    assert validate(ClaimRequest.from_form(**{**_form(request_valido), "arquivo": str(curto)}), cfg) == []
+
+
+def test_sap_recusa_campo_diz_qual_e_o_tamanho(settings):
+    """O erro do pywin32 ("'<unknown>.text' can not be set") vira uma mensagem com o campo e o tamanho."""
+    import pytest
+    from sap_client import SapClient
+    from sap_gateway import ValorRejeitado
+
+    class Campo:
+        MaxLength = 40
+
+        def __setattr__(self, nome, valor):
+            raise AttributeError("Property '<unknown>.text' can not be set.")
+
+    class Sessao:
+        def findById(self, _id):
+            return Campo()
+
+    cliente = SapClient(settings, engine_factory=lambda: None, dormir=lambda s: None)
+    cliente._s = Sessao()
+    with pytest.raises(ValorRejeitado) as erro:
+        cliente._preencher("wnd[0]/x", "descrição do documento", "a" * 46 + ".pdf")
+    texto = str(erro.value)
+    assert "descrição do documento" in texto and "até 40" in texto and "renomeie o arquivo" in texto

@@ -54,7 +54,9 @@ def _validar_arquivo(req: ClaimRequest, settings: Settings) -> list[ValidationIs
     if tamanho == 0:
         return [ValidationIssue(campo, "O arquivo está vazio.")]
 
-    maximo = settings.limites.descricao_documento_max
+    # A descrição do documento ZDC (DRAT-DKTXT) tem 40 posições: um nome maior é recusado na tela do
+    # documento (visto em produção em 05/11/2026). Mesmo com um valor maior no settings.ini, vale 40.
+    maximo = min(settings.limites.descricao_documento_max, DESCRICAO_DOCUMENTO_SAP)
     import unicodedata
     tamanho_nome = tamanho_sap(unicodedata.normalize("NFC", caminho.name))     # como o SAP conta (UTF-16)
     if tamanho_nome > maximo:
@@ -64,6 +66,9 @@ def _validar_arquivo(req: ClaimRequest, settings: Settings) -> list[ValidationIs
             f"caracteres (atual: {tamanho_nome}; emoji conta 2). Renomeie o arquivo.",
         )]
     return []
+
+
+DESCRICAO_DOCUMENTO_SAP = 40    # tamanho do campo de descrição do documento no SAP
 
 
 def tamanho_sap(texto: str) -> int:
