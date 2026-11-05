@@ -291,6 +291,11 @@ def _trocar_python_se_pronto() -> bool:
         import atualizacao_python as ap
         l = ap.locais(pasta_app=APP)
         if ap.pronto_para_trocar(l):
+            if hasattr(ap, "troca_recente") and ap.troca_recente(l):
+                # A troca disparada há pouco não terminou (o script reabre o programa): abre com o Python atual.
+                log.warning("Troca do Python disparada há pouco e não concluída: abrindo com o Python atual "
+                            "(veja troca_python.log)")
+                return False
             log.info("Python novo pronto: trocando antes de abrir")
             ap.reiniciar_com_python_novo(l)
             return True

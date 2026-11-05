@@ -2,6 +2,7 @@
 # Uso, cópia, modificação ou distribuição somente com autorização por escrito do autor. Ver LICENSE.
 """Aviso de atualização do Python do programa (05/11/2026): detectar, baixar com progresso, trocar."""
 
+from pathlib import Path
 import atualizacao_python as ap
 
 
@@ -64,3 +65,67 @@ def test_script_de_troca_espera_o_programa_e_devolve_se_falhar(tmp_path):
     assert 'move "%LOCAL%\\python" "%LOCAL%\\python_antigo"' in script
     assert 'move "%LOCAL%\\python_antigo" "%LOCAL%\\python"' in script          # rollback
     assert str(l.local) in script and "iniciar.py" in script
+
+
+def test_script_de_troca_nao_fica_em_laco_e_registra(tmp_path):
+    """Troca que falha não pode reabrir o programa já pedindo a troca de novo (bug do 1.0.11)."""
+    l = _cenario(tmp_path)
+    script = ap.preparar_troca(l, pid=4321)
+    texto = script.read_text(encoding="cp1252")
+    assert script.name == "trocar_python_4321.cmd"                       # um script por processo
+    assert script.read_bytes().count(b"\r\n") >= 30                      # CRLF: o cmd lê o .cmd certo
+    assert "troca_python.log" in texto and "tentativa" in texto          # registro e novas tentativas
+    desistir = texto.split(":desistir", 1)[1]
+    assert 'del "%LOCAL%\\python_novo\\copia_completa.txt"' in desistir  # sem marca, não repete sozinho
+    assert "timeout /t" not in texto                                     # timeout falha sem console
+    assert "(\n" not in texto.split(":espera", 1)[1]                    # sem blocos: %n%/%t% atualizam
+
+
+class _Troca:
+    """Troca atributos e devolve no fim (sem depender do monkeypatch)."""
+
+    def __init__(self, *trocas):
+        self.trocas, self.antes = trocas, []
+
+    def __enter__(self):
+        for alvo, nome, valor in self.trocas:
+            self.antes.append((alvo, nome, getattr(alvo, nome, _Troca)))
+            setattr(alvo, nome, valor)
+
+    def __exit__(self, *_):
+        for alvo, nome, valor in reversed(self.antes):
+            if valor is _Troca:
+                delattr(alvo, nome)
+            else:
+                setattr(alvo, nome, valor)
+
+
+def test_disparo_sem_janela_piscando_e_com_marca(tmp_path):
+    import subprocess
+    l = _cenario(tmp_path)
+    chamadas = []
+    with _Troca((subprocess, "Popen", lambda *a, **k: chamadas.append((a, k))),
+                (subprocess, "DETACHED_PROCESS", 0x8), (subprocess, "CREATE_NO_WINDOW", 0x8000000)):
+        ap.reiniciar_com_python_novo(l)
+    flags = chamadas[0][1]["creationflags"]
+    assert flags & 0x8000000 and not flags & 0x8          # console oculto, nunca desanexado
+    assert ap.troca_recente(l) and not ap.troca_recente(l, segundos=-1)
+
+
+def test_iniciar_nao_dispara_troca_repetida(tmp_path):
+    import importlib.util
+    import os
+    import sys
+    raiz = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("iniciar_teste_troca", raiz / "distribuicao" / "iniciar.py")
+    ini = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ini)
+    l = _cenario(tmp_path)
+    assert ap.baixar(l)
+    disparos = []
+    with _Troca((ap, "locais", lambda **k: l), (ap, "reiniciar_com_python_novo", lambda x: disparos.append(x))):
+        sys.modules["atualizacao_python"] = ap
+        (l.local / ap.TENTATIVA).write_text("1")              # disparada agora há pouco
+        assert ini._trocar_python_se_pronto() is False and not disparos
+        os.utime(l.local / ap.TENTATIVA, (1, 1))              # antiga
+        assert ini._trocar_python_se_pronto() is True and disparos

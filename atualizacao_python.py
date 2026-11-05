@@ -106,42 +106,82 @@ def baixar(l: Locais, progresso: Callable[[int, int], None] = lambda feito, tota
 
 
 SCRIPT_TROCA = r"""@echo off
+chcp 1252 >nul
 rem Troca do Python da Automação Comercial (gerado pelo programa). Espera o programa fechar.
+rem Sem blocos entre parênteses (as variáveis mudam no laço) e com registro em troca_python.log.
 set "LOCAL={local}"
+set "LOG=%LOCAL%\troca_python.log"
+echo %date% %time% inicio da troca (espera o processo {pid})>>"%LOG%"
+set /a n=0
 :espera
-tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto espera
-)
+tasklist /FI "PID eq {pid}" /NH 2>nul | find " {pid} " >nul
+if errorlevel 1 goto livre
+set /a n+=1
+if %n% GEQ 180 goto desistir
+ping -n 2 127.0.0.1 >nul
+goto espera
+:livre
+set /a t=0
+:mover
 if exist "%LOCAL%\python_antigo" rmdir /s /q "%LOCAL%\python_antigo"
-move "%LOCAL%\python" "%LOCAL%\python_antigo" >nul 2>&1
-if errorlevel 1 goto abrir
-move "%LOCAL%\python_novo" "%LOCAL%\python" >nul 2>&1
-if errorlevel 1 (
-    move "%LOCAL%\python_antigo" "%LOCAL%\python" >nul 2>&1
-    goto abrir
-)
+move "%LOCAL%\python" "%LOCAL%\python_antigo" >>"%LOG%" 2>&1
+if not errorlevel 1 goto colocar_novo
+set /a t+=1
+echo %time% pasta python em uso, tentativa %t% >>"%LOG%"
+if %t% GEQ 30 goto desistir
+ping -n 3 127.0.0.1 >nul
+goto mover
+:colocar_novo
+move "%LOCAL%\python_novo" "%LOCAL%\python" >>"%LOG%" 2>&1
+if not errorlevel 1 goto concluida
+echo nao consegui colocar o Python novo: devolvendo o anterior>>"%LOG%"
+move "%LOCAL%\python_antigo" "%LOCAL%\python" >>"%LOG%" 2>&1
+goto desistir
+:concluida
 del "%LOCAL%\python\{completo}" >nul 2>&1
-rmdir /s /q "%LOCAL%\python_antigo"
+rmdir /s /q "%LOCAL%\python_antigo" >nul 2>&1
+echo %date% %time% troca concluida>>"%LOG%"
+goto abrir
+:desistir
+rem Sem repetir sozinho: o aviso volta a oferecer a atualização na próxima abertura.
+del "%LOCAL%\python_novo\{completo}" >nul 2>&1
+echo %date% %time% troca NAO feita; o Python atual continua>>"%LOG%"
 :abrir
 start "" "%LOCAL%\python\pythonw.exe" "%LOCAL%\iniciar.py"
-del "%~f0"
+(goto) 2>nul & del "%~f0"
 """
+
+TENTATIVA = "troca_python.tentativa"   # marca de quando a troca foi disparada (evita repetir em laço)
 
 
 def preparar_troca(l: Locais, pid: int | None = None) -> Path:
-    """Escreve o script que troca o Python depois que este programa fechar."""
-    script = l.local / "trocar_python.cmd"
-    script.write_text(SCRIPT_TROCA.format(local=l.local, pid=pid or os.getpid(), completo=COMPLETO),
-                      encoding="cp1252", errors="replace")
+    """Escreve o script (um por processo, para dois disparos nunca reescreverem o mesmo arquivo)."""
+    pid = pid or os.getpid()
+    script = l.local / f"trocar_python_{pid}.cmd"
+    script.write_text(SCRIPT_TROCA.format(local=l.local, pid=pid, completo=COMPLETO).replace("\n", "\r\n"),
+                      encoding="cp1252", errors="replace", newline="")
     return script
 
 
+def troca_recente(l: Locais | None, segundos: int = 600) -> bool:
+    """Já disparou uma troca há pouco? Então não dispara outra ao abrir (nunca fica em laço)."""
+    import time
+    if l is None:
+        return False
+    try:
+        return time.time() - (l.local / TENTATIVA).stat().st_mtime < segundos
+    except OSError:
+        return False
+
+
 def reiniciar_com_python_novo(l: Locais) -> None:
-    """Dispara a troca (o programa deve fechar logo em seguida)."""
+    """Dispara a troca (o programa deve fechar logo em seguida).
+
+    Console oculto (CREATE_NO_WINDOW), sem DETACHED_PROCESS: desanexado, cada comando do script
+    (tasklist, find, ping) abriria uma janela de CMD piscando.
+    """
     script = preparar_troca(l)
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) \
-        | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    subprocess.Popen(["cmd", "/c", str(script)], creationflags=flags, close_fds=True)
+    (l.local / TENTATIVA).write_text(str(os.getpid()), encoding="utf-8")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen(["cmd", "/c", str(script)], creationflags=flags, close_fds=True, cwd=str(l.local))
     log.info("Troca do Python agendada: %s", script)
