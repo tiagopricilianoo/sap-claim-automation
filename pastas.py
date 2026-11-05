@@ -47,6 +47,7 @@ class PlanoPastas:
     raiz_produto_a: Path
     raiz_produto_b: Path
     ano: int
+    origem_gerador: Path | None = None   # pasta da planilha do Gerador (Nacional/Exportação)
 
 
 # ------------------------------------------------------------------------ nomes
@@ -190,7 +191,9 @@ def planejar_pastas(req: CotacaoRequest, cfg: CotacaoConfig, perguntar: Pergunta
         mercado = ("Brasil", req.regiao) if req.tipo == "Nacional" else ("Exportação", req.regiao, req.pais)
         projeto = _pasta_do_projeto(_caminho(raiz, *mercado), req.cliente, req.projeto, perguntar)
         _conferir_outra_rede(req, cfg, principal, ano, perguntar)
-        plano = PlanoPastas(principal, projeto / "R.0", projeto / "R.X", raiz_tu, raiz_tr, ano)
+        origem = cfg.gerador_nacional if req.tipo == "Nacional" else cfg.gerador_exportacao
+        plano = PlanoPastas(principal, projeto / "R.0", projeto / "R.X", raiz_tu, raiz_tr, ano,
+                            Path(origem) if origem else None)
     if len(str(plano.base)) > MAX_CAMINHO - 60:
         raise CaminhoMuitoLongo(f"Caminho muito longo para a rede ({len(str(plano.base))} caracteres):\n{plano.base}\n"
                                 "Encurte o nome do cliente ou do projeto.")
@@ -221,6 +224,49 @@ def _copiar_primeiro(origem: Path, padrao: str, destino: Path) -> None:
     alvo = destino / achados[0].name
     if not alvo.exists():
         shutil.copy2(achados[0], alvo)
+
+
+_VERSAO_PL_PADRAO = re.compile(r"^PL_Padr[aã]o_\(R(\d+)\)\.xls[xmb]?$", re.IGNORECASE)
+
+
+def planilha_gerador(origem: Path) -> Path | None:
+    """Planilha do Gerador a copiar.
+
+    Nacional: 'PL_Padrão_(R80).xlsx' — o número é a versão; vale a MAIOR versão da pasta.
+    Exportação (ou qualquer pasta sem esse padrão): o único Excel da pasta; se houver mais de um,
+    o modificado por último. Arquivos temporários do Excel ('~$...') são ignorados.
+    """
+    try:
+        excels = [p for p in origem.iterdir()
+                  if p.is_file() and p.suffix.lower() in (".xls", ".xlsx", ".xlsm", ".xlsb")
+                  and not p.name.startswith("~$")]
+    except OSError:
+        return None
+    versoes = []
+    for p in excels:
+        achado = _VERSAO_PL_PADRAO.match(unicodedata.normalize("NFC", p.name))
+        if achado:
+            versoes.append((int(achado.group(1)), p))
+    if versoes:
+        return max(versoes, key=lambda v: v[0])[1]
+    if not excels:
+        return None
+    if len(excels) > 1:
+        log.warning("Mais de um Excel em %s; usando o mais recente", origem)
+    return max(excels, key=lambda p: p.stat().st_mtime)
+
+
+def _copiar_gerador(origem: Path | None, destino: Path) -> None:
+    if origem is None:
+        return
+    _pasta(destino)
+    arquivo = planilha_gerador(origem)
+    if arquivo is None:
+        log.warning("Planilha do Gerador não encontrada em %s", origem)
+        return
+    alvo = destino / arquivo.name
+    if not alvo.exists():
+        shutil.copy2(arquivo, alvo)
 
 
 def atalho_windows(arquivo: Path, alvo: str) -> None:
@@ -267,6 +313,7 @@ def criar_pastas(plano: PlanoPastas, numero: str, criar_atalho: CriarAtalho = at
     if plano.revisao_x is not None:
         _arvore_padrao(plano.revisao_x, numero)
     _arvore_padrao(base, numero)
+    _copiar_gerador(plano.origem_gerador, base / "Cotações" / "Gerador")
     if plano.modelo == "TU":
         _copiar_primeiro(tu / "PLANILHA DE CUSTO", "*.xlsm", base / "Custos")
         _copiar_primeiro(tu / "Padrão de Propostas", "*.xlsm", base / "Propostas")

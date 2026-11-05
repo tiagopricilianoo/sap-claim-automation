@@ -140,7 +140,7 @@ def test_pip_sem_internet_com_python_embutido_segue(servidor, pc):
 
 # ------------------------------------------------------------------ Python embutido
 
-def _runtime_falso(pasta, com=("customtkinter", "win32com", "win32"), tkinter=True):
+def _runtime_falso(pasta, com=("customtkinter", "win32com", "win32", "PySide6"), tkinter=True):
     pasta.mkdir()
     for exe in ("python.exe", "pythonw.exe"):
         (pasta / exe).write_bytes(b"MZ")
@@ -165,8 +165,9 @@ def test_publica_o_python_embutido(servidor, tmp_path):
 
 @pytest.mark.parametrize("problema,kwargs", [
     ("tkinter", {"tkinter": False}),
-    ("customtkinter", {"com": ("win32com", "win32")}),
-    ("win32com", {"com": ("customtkinter", "win32")}),
+    ("customtkinter", {"com": ("win32com", "win32", "PySide6")}),
+    ("win32com", {"com": ("customtkinter", "win32", "PySide6")}),
+    ("PySide6", {"com": ("customtkinter", "win32com", "win32")}),
 ])
 def test_recusa_python_incompleto(servidor, tmp_path, problema, kwargs):
     runtime = _runtime_falso(tmp_path / "python", **kwargs)
@@ -203,8 +204,11 @@ def test_todo_modulo_importado_vai_para_a_producao():
     enviados = {n[:-3] for n in publicar.ARQUIVOS_DO_PROGRAMA if n.endswith(".py")}
     so_dev = {"sap_fake", "ensaio", "publicar"}      # importados só em simulação/desenvolvimento
     faltando = set()
-    for nome in enviados:
-        arvore = ast.parse((RAIZ / f"{nome}.py").read_text(encoding="utf-8"))
+    arquivos = [RAIZ / f"{nome}.py" for nome in enviados]
+    for pasta in getattr(publicar, "PASTAS_DO_PROGRAMA", ()):
+        arquivos += sorted((RAIZ / pasta).rglob("*.py"))
+    for arquivo in arquivos:
+        arvore = ast.parse(arquivo.read_text(encoding="utf-8"))
         for no in ast.walk(arvore):
             modulos = [a.name for a in no.names] if isinstance(no, ast.Import) else \
                       [no.module] if isinstance(no, ast.ImportFrom) and no.module else []
@@ -298,3 +302,27 @@ def test_versao_nao_numerica_no_servidor_e_ignorada(servidor, pc):
     (servidor / "app" / "versao.txt").write_text("1.0.1-hotfix\n")
     assert "ignorada" in iniciar.atualizar(servidor / "app", pc, instalar_libs=_sem_pip)
     assert iniciar.ler_versao(pc / "app") == "2.0.0"
+
+
+# ------------------------------------------------------------------ interface PySide6 (05/11/2026)
+
+def test_pacote_leva_a_interface_nova(tmp_path):
+    destino = tmp_path / "app"
+    publicar.montar_pacote(RAIZ, destino, "1.0.0")
+    assert (destino / "app_qt.py").exists() and (destino / "ui_qt" / "janela.py").exists()
+    assert (destino / "ui_qt" / "paginas" / "claim.py").exists()
+    assert not list(destino.rglob("__pycache__"))
+    assert "PySide6" not in (destino / "requirements.txt").read_text()       # vem no Python embutido
+    assert iniciar.conferir_manifesto(destino, "1.0.0") == ""                 # subpastas no manifesto
+
+
+def test_inicializador_escolhe_a_interface(tmp_path):
+    import importlib.util
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "ui.py").write_text("")
+    assert iniciar.escolher_interface(app) == "ui.py"                         # versão antiga do pacote
+    (app / "app_qt.py").write_text("")
+    (app / "ui_qt").mkdir()
+    esperado = "app_qt.py" if importlib.util.find_spec("PySide6") else "ui.py"
+    assert iniciar.escolher_interface(app) == esperado                         # sem PySide6: a anterior

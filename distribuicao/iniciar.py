@@ -268,8 +268,43 @@ def main() -> None:
 
     sys.path.insert(0, str(APP))
     os.chdir(APP)
-    log.info("Abrindo versão %s (%s)", ler_versao(APP), datetime.now().isoformat(timespec="seconds"))
+    if _trocar_python_se_pronto():
+        return
+    interface = escolher_interface(APP)
+    log.info("Abrindo versão %s com %s (%s)", ler_versao(APP), interface,
+             datetime.now().isoformat(timespec="seconds"))
+    if interface == "app_qt.py":
+        try:
+            runpy.run_path(str(APP / "app_qt.py"), run_name="__main__")
+            return
+        except SystemExit:
+            return
+        except ImportError:
+            # PySide6 presente mas sem carregar (ex.: DLL): a interface anterior continua funcionando.
+            log.exception("Interface nova não abriu; usando a anterior")
     runpy.run_path(str(APP / "ui.py"), run_name="__main__")
+
+
+def _trocar_python_se_pronto() -> bool:
+    """Python novo já baixado ("Na próxima vez"): agenda a troca, fecha e o script reabre o programa."""
+    try:
+        import atualizacao_python as ap
+        l = ap.locais(pasta_app=APP)
+        if ap.pronto_para_trocar(l):
+            log.info("Python novo pronto: trocando antes de abrir")
+            ap.reiniciar_com_python_novo(l)
+            return True
+    except Exception:  # noqa: BLE001 - nunca impede de abrir
+        log.exception("Troca do Python")
+    return False
+
+
+def escolher_interface(app: Path) -> str:
+    """Interface nova (PySide6) quando o pacote tem app_qt.py e o PySide6 está instalado; senão, ui.py."""
+    import importlib.util
+    if (app / "app_qt.py").exists() and (app / "ui_qt").is_dir() and importlib.util.find_spec("PySide6"):
+        return "app_qt.py"
+    return "ui.py"
 
 
 if __name__ == "__main__":

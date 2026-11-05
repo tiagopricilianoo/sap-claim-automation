@@ -101,6 +101,7 @@ class App(ctk.CTk):
         self._atualizar_listas()
         self._verificar_sap()
         self.after(100, self._processar_fila)
+        self.after(2500, self._verificar_atualizacao)
 
     # ------------------------------------------------------------------ cabeçalho
 
@@ -941,6 +942,13 @@ class App(ctk.CTk):
             rotulo = ROTULO_ESTADO.get(estado, getattr(estado, "value", "Resultado")) if estado else "Resultado"
             messagebox.showinfo(f"Antes de fechar: {rotulo}", mensagem or "Execução encerrada.", parent=self)
         self._encerrar()
+
+    def _verificar_atualizacao(self) -> None:
+        try:
+            from ui_atualizacao import verificar
+            verificar(self)
+        except Exception:  # noqa: BLE001 - nunca atrapalha o uso
+            logging.getLogger("claim.ui").exception("verificar atualização")
 
     def _encerrar(self) -> None:
         try:

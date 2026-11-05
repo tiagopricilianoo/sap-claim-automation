@@ -42,12 +42,17 @@ ARQUIVOS_DO_PROGRAMA = (
     "ui.py", "controlador.py", "claim_service.py", "config.py", "models.py", "validators.py",
     "state.py", "storage.py", "sap_gateway.py", "sap_client.py", "logger_config.py",
     "verificar_sap.py", "sobre.py", "tema.ini", "tema_ui.py", "ui_cotacao.py", "cotacao.py", "cotacao_service.py",
-    "pastas.py", "storage_cotacao.py",
+    "pastas.py", "storage_cotacao.py", "instancia.py", "app_qt.py", "atualizacao_python.py",
+    "ui_atualizacao.py",
 )
+# Pacotes (pastas inteiras, sem __pycache__): a interface PySide6.
+PASTAS_DO_PROGRAMA = ("ui_qt",)
 ASSETS = ("logo.png", "logo_40.png", "logo_80.png", "app.ico")
 # Versões FIXAS: um pip nos computadores nunca pode trazer uma biblioteca nova que derrube a tela.
 # Na publicação vale a versão testada aqui (a instalada nesta máquina); sem ela, a faixa conhecida.
 BIBLIOTECAS_PRODUCAO = {"pywin32": "pywin32>=312,<400", "customtkinter": "customtkinter>=5.2,<5.3"}
+# O PySide6 (~200 MB) NÃO vai no requirements: o pip baixaria isso em cada computador. Ele chega pelo
+# Python embutido (publicar.py --com-python + instalar.bat de novo); sem ele, abre a interface anterior.
 
 
 def requirements_producao() -> str:
@@ -95,6 +100,8 @@ def montar_pacote(origem: Path, destino: Path, versao: str) -> None:
     destino.mkdir(parents=True)
     for nome in ARQUIVOS_DO_PROGRAMA:
         shutil.copy2(origem / nome, destino / nome)
+    for nome in PASTAS_DO_PROGRAMA:
+        shutil.copytree(origem / nome, destino / nome, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (destino / "assets").mkdir()
     for nome in ASSETS:
         shutil.copy2(origem / "assets" / nome, destino / "assets" / nome)
@@ -199,7 +206,7 @@ def publicar(servidor: Path, versao: str | None = None, nota: str = "", origem: 
 
 
 # Bibliotecas que o runtime embutido precisa ter (pasta dentro de Lib/site-packages).
-BIBLIOTECAS_DO_RUNTIME = ("customtkinter", "win32com", "win32")
+BIBLIOTECAS_DO_RUNTIME = ("customtkinter", "win32com", "win32", "PySide6")
 
 
 def runtime_atual() -> Path:
@@ -232,7 +239,9 @@ def publicar_runtime(servidor: Path, runtime: Path | None = None) -> str:
     if temporaria.exists():
         _apagar(temporaria)
     shutil.copytree(runtime, temporaria, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "pytest*", "_pytest"))
-    descricao = f"{sys.version.split()[0]} | {runtime}"
+    from datetime import datetime
+    # A data entra para cada publicação ser "nova" nos computadores (aviso de atualização na tela).
+    descricao = f"{sys.version.split()[0]} | {runtime} | publicado {datetime.now():%Y-%m-%d %H:%M:%S}"
     (temporaria / "runtime.txt").write_text(descricao + "\n", encoding="utf-8")
     if anterior.exists():
         _apagar(anterior)

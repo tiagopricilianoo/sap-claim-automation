@@ -55,7 +55,9 @@ Esta aplicação desktop recebe os dados num formulário, **valida tudo antes de
 | Conferência da grade | Cada linha criada é conferida (descrição, sub grupo, responsável) antes de transferir |
 | Anti-duplicidade | Bloqueia um segundo claim para a mesma ordem/item enquanto houver execução concluída ou pendente |
 | Máquina de estados | Depois de enviar a gravação, nenhum caminho volta a gravar automaticamente |
-| Interface moderna | CustomTkinter, validação em tempo real, andamento por etapa, histórico e pendências |
+| Interface moderna | PySide6 (Qt) com menu lateral, painel, tema claro/escuro, arrastar e soltar o anexo, linha do tempo das etapas, histórico com filtros e pendências; a interface CustomTkinter anterior continua como reserva |
+| Planilha do Gerador | Ao criar as pastas, copia a planilha de custo para a proposta (no produto nacional, a de versão mais alta pelo número `(R##)` do nome) |
+| Aviso de atualização | Quando a publicação traz um Python novo, o programa pergunta "Há uma nova atualização disponível", baixa com barra de progresso e troca o Python ao reiniciar, com volta automática se a troca falhar |
 | Atualização automática | Publicação num servidor de arquivos; cada computador se atualiza ao abrir |
 | Python embutido | O instalador leva o próprio Python: funciona em máquinas sem Python, sem internet e sem administrador |
 | Claims sem anexo | Opção explícita "Este claim não tem anexo" pula o documento DMS; sem ela, o anexo continua obrigatório |
@@ -117,7 +119,9 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TB
-    UI[ui.py<br/>interface CustomTkinter] --> CTRL[controlador.py<br/>thread de execução e fila de eventos]
+    QT[ui_qt/ + app_qt.py<br/>interface PySide6] --> PONTE[ui_qt/ponte.py<br/>fila de eventos → sinais Qt]
+    PONTE --> CTRL[controlador.py<br/>thread de execução e fila de eventos]
+    UI[ui.py<br/>interface CustomTkinter, reserva] --> CTRL
     CTRL --> SVC[claim_service.py<br/>orquestração e máquina de estados]
     SVC --> VAL[validators.py]
     SVC --> STO[storage.py<br/>histórico SQLite]
@@ -131,14 +135,14 @@ flowchart TB
     CFG[config.py + settings.ini] --> SVC
 ```
 
-Somente `sap_client.py` conhece IDs técnicos de tela. A lógica de negócio fala com um **contrato** (`SapGateway`) implementado tanto pelo SAP real quanto por um SAP simulado, o que permite testar todo o fluxo, inclusive falhas, sem acesso ao SAP.
+As duas interfaces usam o mesmo controlador e as mesmas regras; a thread de trabalho nunca toca na tela (no Qt, um `QTimer` esvazia a fila de eventos e emite sinais). Somente `sap_client.py` conhece IDs técnicos de tela. A lógica de negócio fala com um **contrato** (`SapGateway`) implementado tanto pelo SAP real quanto por um SAP simulado, o que permite testar todo o fluxo, inclusive falhas, sem acesso ao SAP.
 
 ## Requisitos
 
 - Windows com **SAP GUI** instalado e **SAP GUI Scripting** habilitado no cliente e no servidor
   (no SAP: Alt+F12 → Opções → Acessibilidade e Scripts → Scripts)
 - Python 3 (testado em 3.13 e 3.15)
-- `pywin32` e `customtkinter`
+- `pywin32`, `PySide6` (interface nova) e `customtkinter` (interface anterior)
 
 ## Instalação para desenvolvimento
 
@@ -146,8 +150,9 @@ Somente `sap_client.py` conhece IDs técnicos de tela. A lógica de negócio fal
 git clone https://github.com/tiagopricilianoo/sap-claim-automation.git
 cd sap-claim-automation
 python -m pip install -r requirements.txt
-python -m pytest -q           # 746 testes, sem precisar de SAP
-python ui.py                  # abre no modo Simulação
+python -m pytest -q           # 774 testes, sem precisar de SAP
+python app_qt.py              # interface nova, no modo Simulação
+python ui.py                  # interface anterior
 ```
 
 ## Configuração
@@ -210,7 +215,7 @@ sequenceDiagram
     else servidor inacessível
         PC->>PC: abre a versão instalada
     end
-    PC->>PC: abre o programa
+    PC->>PC: abre o programa (app_qt.py se o PySide6 carregar; senão ui.py)
 ```
 
 ```powershell
@@ -218,9 +223,11 @@ python publicar.py "\\servidor\pasta\AutomacaoClaims" --nota "o que mudou"
 python publicar.py "\\servidor\pasta\AutomacaoClaims" --com-python   # leva o Python junto
 ```
 
-Com `--com-python`, o Python em uso (com tkinter, pywin32 e customtkinter) é copiado para `<servidor>\python`
+Com `--com-python`, o Python em uso (com tkinter, pywin32, customtkinter e PySide6) é copiado para `<servidor>\python`
 e o `instalar.bat` passa a usá-lo: os usuários não precisam ter Python instalado. A versão *embeddable*
 oficial não serve, porque não inclui o tkinter.
+
+O programa se atualiza sozinho ao abrir, mas o Python não pode ser trocado enquanto está em uso. Por isso, quando o `runtime.txt` do servidor muda, a tela pergunta se o usuário quer baixar: a cópia vai para `python_novo` (conferida por quantidade e tamanho dos arquivos), e ao reiniciar um script pequeno espera o programa fechar, troca as pastas e abre de novo, devolvendo o Python anterior se algo falhar.
 
 - Usuários rodam `instalar.bat` **direto da pasta do servidor**, uma única vez; o atalho é criado na área de trabalho.
 - O programa roda localmente; o histórico de cada usuário fica em `%LOCALAPPDATA%\ClaimAutomation`.
@@ -234,7 +241,7 @@ oficial não serve, porque não inclui o tkinter.
 python -m pytest -q
 ```
 
-746 testes cobrem configuração, validação, máquina de estados, histórico, o cliente SAP (com objetos COM simulados que reproduzem o comportamento real da árvore, da grade, das tabelas de itens e das janelas), a orquestração em todos os modos, cotação e pastas, a interface (controlador) e o ciclo de publicação e atualização. Vários são testes de regressão de problemas encontrados no SAP real, como os códigos de nó que mudam entre sessões.
+774 testes cobrem configuração, validação, máquina de estados, histórico, o cliente SAP (com objetos COM simulados que reproduzem o comportamento real da árvore, da grade, das tabelas de itens e das janelas), a orquestração em todos os modos, cotação e pastas, as duas interfaces (inclusive a PySide6 sem tela, com `QT_QPA_PLATFORM=offscreen`), a atualização do Python e o ciclo de publicação e atualização. Vários são testes de regressão de problemas encontrados no SAP real, como os códigos de nó que mudam entre sessões.
 
 Os arquivos `tests/test_rev_*.py` e `tests/test_rev2_*.py` vieram de duas rodadas de revisão adversarial (segurança, uso, arquitetura e testes) feitas antes de cada publicação: cada defeito encontrado virou um teste que falhava antes da correção.
 
@@ -242,8 +249,13 @@ Os arquivos `tests/test_rev_*.py` e `tests/test_rev2_*.py` vieram de duas rodada
 
 ```
 sap-claim-automation/
-├── ui.py                 Interface desktop (abas de claim, histórico e pendências)
-├── ui_cotacao.py         Abas "Nova cotação" e "Cotações"
+├── app_qt.py             Entrada da interface nova (PySide6)
+├── ui_qt/                Interface nova: janela, páginas, componentes, tema claro/escuro e ícones
+├── ui.py                 Interface anterior (CustomTkinter), mantida como reserva
+├── ui_cotacao.py         Abas "Nova cotação" e "Cotações" da interface anterior
+├── ui_atualizacao.py     Aviso de atualização na interface anterior
+├── atualizacao_python.py Download e troca do Python do programa
+├── instancia.py          Trava de instância única
 ├── tema_ui.py            Tema, trabalho em segundo plano e instância única
 ├── controlador.py        Execução em segundo plano e eventos para a tela
 ├── claim_service.py      Orquestração, modos e regras de estado

@@ -178,7 +178,7 @@ def engine_padrao() -> Any:
         import win32com.client  # importado aqui para os testes rodarem fora do Windows
     except ImportError as erro:
         raise SessaoIndisponivel(
-            "pywin32 não está instalado. Rode: python -m pip install pywin32", etapa="conexao"
+            f"pywin32 não carregou ({erro}). Rode: python -m pip install pywin32", etapa="conexao"
         ) from erro
     try:
         gui = win32com.client.GetObject("SAPGUI")

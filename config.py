@@ -84,6 +84,9 @@ class CotacaoConfig:
     raiz_produto_a: str            # pasta de rede das propostas de Produto A
     raiz_produto_b: str            # pasta de rede das propostas de Produto B
     tipos: dict[str, TipoCotacao] = field(default_factory=dict)
+    # Planilha do Gerador copiada para Cotações\Gerador da proposta (pasta de origem; vazio = não copia)
+    gerador_nacional: str = ""
+    gerador_exportacao: str = ""
     rota_produto_a: str = "PRODUTO_A"     # material e centro da linha vêm destas rotas
     rota_produto_b: str = "PRODUTO_B"
 
@@ -264,6 +267,8 @@ def _carregar_cotacao(parser: configparser.ConfigParser, rotas: dict[str, RouteC
         validade_meses=_inteiro(parser, "cotacao", "validade_meses"),
         raiz_produto_a=_obrigatorio(parser, "pastas", "raiz_produto_a"),
         raiz_produto_b=_obrigatorio(parser, "pastas", "raiz_produto_b"),
+        gerador_nacional=parser.get("pastas", "gerador_nacional", fallback="").strip(),
+        gerador_exportacao=parser.get("pastas", "gerador_exportacao", fallback="").strip(),
         tipos=tipos,
     )
     for chave in (cfg.rota_produto_a, cfg.rota_produto_b):
